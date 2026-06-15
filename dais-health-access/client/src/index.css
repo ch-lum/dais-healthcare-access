@@ -1,0 +1,62 @@
+@import "@databricks/appkit-ui/styles.css";
+
+:root {
+  --radius: 1rem;
+  --background: #f9f7f4;
+  --foreground: #0b2026;
+  --card: #fffdf9;
+  --card-foreground: #0b2026;
+  --popover: #fffdf9;
+  --popover-foreground: #0b2026;
+  --primary: #ff3621;
+  --primary-foreground: #fff4ef;
+  --secondary: #eeede9;
+  --secondary-foreground: #0b2026;
+  --muted: #f1eee8;
+  --muted-foreground: #5f6b6f;
+  --accent: #ffe4db;
+  --accent-foreground: #0b2026;
+  --destructive: #c6382a;
+  --destructive-foreground: #fff6f3;
+  --success: #1f8a70;
+  --success-foreground: #f7fffb;
+  --warning: #e6a23c;
+  --warning-foreground: #1f2324;
+  --border: #d9d4cc;
+  --input: #d9d4cc;
+  --ring: #ff7d67;
+  --chart-1: #ff3621;
+  --chart-2: #0b2026;
+  --chart-3: #1f8a70;
+  --chart-4: #f2994a;
+  --chart-5: #c6a46a;
+  --sidebar: #f3f0ea;
+  --sidebar-foreground: #0b2026;
+  --sidebar-primary: #ff3621;
+  --sidebar-primary-foreground: #fff4ef;
+  --sidebar-accent: #efe8df;
+  --sidebar-accent-foreground: #0b2026;
+  --sidebar-border: #d9d4cc;
+  --sidebar-ring: #ff7d67;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(255, 54, 33, 0.08), transparent 22%),
+    radial-gradient(circle at top right, rgba(11, 32, 38, 0.08), transparent 26%),
+    linear-gradient(180deg, #f9f7f4 0%, #f2efe8 100%);
+  color: var(--foreground);
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+::selection {
+  background: rgba(255, 54, 33, 0.18);
+}
