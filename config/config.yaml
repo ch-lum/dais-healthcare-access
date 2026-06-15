@@ -1,0 +1,51 @@
+# Facility Processing
+facility:
+  treatment_columns:
+    - specialties
+    - procedures
+    - equipment
+    - description
+  top_n_treatments: 5
+  drop_null_coords: true
+  drop_null_treatments: true
+
+# Survey Processing
+survey:
+  preserve_columns:
+    - district_name
+    - state_ut
+  numeric_conversion: true
+  use_scaling: true
+
+# OpenAI API
+openai:
+  model: "gpt-4o-mini"
+  max_tokens: 4000
+  temperature: 0.3
+  api_key_env_var: "OPENAI_API_KEY"
+
+# Distance Decay
+distance_decay:
+  function: "piecewise"
+  zones:
+    - max: 50
+      weight: 1.0
+    - max: 100
+      weight: 0.8
+    - max: 200
+      weight: 0.5
+    - max: 400
+      weight: 0.3
+    - max: .inf
+      weight: 0.15
+
+# Databricks Tables (to be configured by user)
+databricks:
+  facility_table: "catalog.schema.facilities"
+  survey_table: "catalog.schema.nfhs_survey"
+  geo_reference_table: "catalog.schema.postal_codes"
+
+# Output
+output:
+  csv_filename: "priority_table.csv"
+  output_dir: "./outputs"
