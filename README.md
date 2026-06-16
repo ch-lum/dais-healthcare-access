@@ -16,6 +16,9 @@ The app currently has a working vertical slice:
 - Demo seed data for recommendations so the prioritization page can render before a full pipeline refresh.
 - Scripts for loading facility snapshots and recommendation snapshots into Lakebase.
 - Databricks Asset Bundle config pointed at the authenticated workspace.
+- Live Lakebase project for this app: `projects/dais-health-access-db`.
+- Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
+- Current recommendation serving table has 25 pipeline-generated demo rows across 5 treatments.
 
 Recent verification:
 
@@ -24,6 +27,8 @@ Recent verification:
 - `npm run lint` passes.
 - Databricks bundle validation passes with profile `dais-health`.
 - Production frontend preview smoke check passed in local Google Chrome for `/`, `/explorer`, and `/prioritization`.
+- Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
+- Bounded Databricks-backed Python pipeline run succeeded with 3,000 facility rows, all 706 survey rows, and 50,000 pincode rows.
 
 ## Demo Story
 
@@ -142,6 +147,30 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers the prioritization page
   - seeded by the server for demo safety if empty
+  - currently loaded with 25 `databricks_demo` recommendation rows from the Python pipeline
+
+## Upstream Databricks Tables
+
+The Python pipeline config now points at the real DAIS Unity Catalog tables:
+
+```yaml
+databricks:
+  facility_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities"
+  survey_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.nfhs_5_district_health_indicators"
+  geo_reference_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.india_post_pincode_directory"
+```
+
+Verified row counts:
+
+- `facilities`: 10,088 rows
+- `nfhs_5_district_health_indicators`: 706 rows
+- `india_post_pincode_directory`: 165,627 rows
+
+For the current demo run, the pipeline used a bounded sample:
+
+- facilities: 3,000 India facilities with valid coordinate bounds
+- survey: all rows
+- pincode/geography: 50,000 rows with valid India coordinate bounds
 
 ## Recommendation Data Model
 
@@ -199,6 +228,8 @@ Pipeline stages:
 Config lives in [`dais-health-access/python/config/config.yaml`](dais-health-access/python/config/config.yaml).
 
 The OpenAI-based survey-signal mapping path still exists, but the default demo-safe path can use deterministic keyword fallback when an API key is unavailable.
+
+The current loaded demo used deterministic fallback symptom mapping. A persisted symptom mapping table is still a future productionization step; conceptually it should be generated once and reused until treatment/survey signal definitions change.
 
 ## Notebooks
 
@@ -403,6 +434,8 @@ Current app resource:
 - workspace host: `https://dbc-2d7a6b3b-9ab6.cloud.databricks.com`
 - Lakebase branch: `projects/dais-health-access-db/branches/production`
 - Lakebase database: `projects/dais-health-access-db/branches/production/databases/databricks-postgres`
+- Lakebase endpoint: `projects/dais-health-access-db/branches/production/endpoints/primary`
+- app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`
 
 Bundle validation has passed with:
 
