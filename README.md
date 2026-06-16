@@ -86,6 +86,7 @@ The app does not recompute heavy prioritization logic on page load. The intended
     +-- scripts/
     |   +-- load-facilities-snapshot.ts
     |   +-- load-recommendations-snapshot.ts
+    |   +-- load-symptom-mapping-snapshot.ts
     +-- tests/smoke.spec.ts
     +-- python/
         +-- config/config.yaml
@@ -150,6 +151,10 @@ Tables:
   - powers the prioritization page
   - seeded by the server for demo safety if empty
   - currently loaded with 250 `openai_symptom_mapping` recommendation rows from the Python pipeline
+- `app_data.symptom_mappings`
+  - loaded by `scripts/load-symptom-mapping-snapshot.ts`
+  - stores one row per treatment with text justification and a JSONB map of all survey signals to `0` or `1`
+  - currently loaded with 25 OpenAI-generated treatment mappings
 
 ## Upstream Databricks Tables
 
@@ -239,6 +244,8 @@ The OpenAI-based survey-signal mapping path now validates a production table sha
 - mapping source, model, and update timestamp
 
 The default demo-safe path can still use deterministic keyword fallback when an API key is unavailable. Generated symptom mapping artifacts are written to `outputs/symptom_mapping.csv` and `outputs/symptom_mapping.json`; conceptually this table should be generated once and reused until treatment/survey signal definitions change.
+
+The wide CSV/JSON artifacts keep every survey signal as a top-level `0` or `1` column for auditability. The Lakebase serving copy stores those same binary signals in `app_data.symptom_mappings.signal_mapping` as JSONB.
 
 ## Notebooks
 
@@ -400,6 +407,12 @@ Load recommendations into Lakebase:
 
 ```bash
 npm run load:recommendations-snapshot -- outputs/app_recommendations.json
+```
+
+Load the generated symptom mapping into Lakebase:
+
+```bash
+npm run load:symptom-mapping-snapshot -- outputs/symptom_mapping.json
 ```
 
 The prioritization page also has a demo refresh button that reseeds built-in sample rows.
