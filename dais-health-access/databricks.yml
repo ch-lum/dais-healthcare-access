@@ -31,7 +31,7 @@ targets:
   default:
     default: true
     workspace:
-      host: https://dbc-f5f93907-1178.cloud.databricks.com
+      host: https://dbc-2d7a6b3b-9ab6.cloud.databricks.com
 
     variables:
       postgres_branch: projects/dais-health-access-db/branches/production
