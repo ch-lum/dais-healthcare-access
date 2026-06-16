@@ -149,7 +149,7 @@ function parseSignals(value: ShuttleRecommendation['top_contributing_signals']) 
   }
 
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? (parsed as SignalContribution[]) : [];
   } catch {
     return [];
@@ -522,7 +522,7 @@ export function PrioritizationPage() {
                       : 'No recommendation loaded yet'}
                   </p>
                 </div>
-                <Button onClick={refreshDemoRecommendations} disabled={refreshing} className="w-full">
+                <Button onClick={() => void refreshDemoRecommendations()} disabled={refreshing} className="w-full">
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                   {refreshing ? 'Refreshing demo' : 'Refresh demo snapshot'}
                 </Button>

@@ -88,6 +88,26 @@ npm run dev
 
 The app will be available at the URL shown in the console output.
 
+### Shuttle Recommendation Refresh
+
+The prioritization page is served from the Lakebase table `app_data.shuttle_recommendations`.
+On first app startup, the server creates that table and seeds a small demo snapshot so the UI works even before the full pipeline has run.
+
+For a pipeline-backed refresh:
+
+```bash
+PYTHONPATH=python/src python -m facility_prioritization.pipeline \
+  --output-format json \
+  --output-dir outputs
+
+npm run load:recommendations-snapshot -- outputs/app_recommendations.json
+```
+
+The Python command can read local CSVs with `--facility-csv`, `--survey-csv`, and `--geo-csv`, or Databricks tables from `python/config/config.yaml`.
+The loader replaces the Lakebase serving table with the latest precomputed rows.
+
+The page also includes a demo refresh button that reseeds the built-in sample rows for hackathon walkthroughs.
+
 ### Build
 
 Build both client and server for production:
