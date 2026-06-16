@@ -1,6 +1,6 @@
 # DAIS Healthcare Access
 
-Healthcare access and shuttle-coordination demo for a Databricks/AppKit hackathon.
+HospiShuttle, a healthcare access and shuttle-coordination demo for a Databricks/AppKit hackathon.
 
 The production app lives in [`dais-health-access/`](dais-health-access/). Treat that directory as the single source of truth for application code, Databricks bundle config, Lakebase routes, frontend UI, and the Python prioritization pipeline.
 
@@ -9,8 +9,7 @@ The production app lives in [`dais-health-access/`](dais-health-access/). Treat 
 The app currently has a working vertical slice:
 
 - Databricks AppKit app with React, TypeScript, Tailwind CSS, and AppKit UI components.
-- Lakebase-backed facilities explorer.
-- Lakebase-backed shuttle recommendation experience on the prioritization page.
+- Single-page HospiShuttle website focused on Lakebase-backed shuttle recommendations.
 - Python prioritization package that preserves the original notebook/pipeline stages.
 - App-facing recommendation output model, one row per `treatment + origin_region + destination_facility`.
 - Demo seed data for recommendations so the prioritization page can render before a full pipeline refresh.
@@ -18,7 +17,7 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 250 `map_route_view` pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
+- Current recommendation serving table has 250 `openai_continuous_symptom_mapping` pipeline rows across 25 treatments using the continuous OpenAI symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
 - The production Lakebase symptom mapping now uses the OpenAI-generated continuous, direction-aware regime with one row per `treatment + survey_signal`.
 
 Recent verification:
@@ -33,7 +32,7 @@ Recent verification:
 - Lakebase `app_data.symptom_mappings` was refreshed from that continuous mapping and round-trip exported back to 202 long-form signal rows.
 - Lakebase `app_data.shuttle_recommendations` was refreshed with 250 `openai_continuous_symptom_mapping` recommendation rows.
 - Databricks bundle validation passes with profile `dais-health`.
-- Production frontend preview smoke check passed in local Google Chrome for `/`, `/explorer`, and `/prioritization`.
+- HospiShuttle frontend build, typecheck, and lint pass after simplifying the website to the prioritization page only. Playwright smoke was updated for `/`, `/prioritization`, and retired-path redirect behavior, but the local smoke command stalled during Chromium setup in this environment.
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
 - Bounded Databricks-backed Python pipeline run succeeded with 3,000 facility rows, all 706 survey rows, and 50,000 pincode rows.
 - Full Databricks-backed Python pipeline run succeeded for top 25 treatments, strict OpenAI symptom mapping, 17,650 priority rows, and 250 app-serving recommendation rows.
@@ -43,7 +42,7 @@ Recent verification:
 
 ## Demo Story
 
-This is a healthcare-access app for planning shuttle routes to specialty care.
+HospiShuttle is a healthcare-access app for planning shuttle routes to specialty care.
 
 The target user should be able to select a treatment and see the best shuttle-stop recommendations:
 
@@ -83,8 +82,6 @@ The app does not recompute heavy prioritization logic on page load. The intended
     +-- package.json
     +-- client/
     |   +-- src/App.tsx
-    |   +-- src/pages/HomePage.tsx
-    |   +-- src/pages/FacilitiesPage.tsx
     |   +-- src/pages/PrioritizationPage.tsx
     |   +-- src/index.css
     +-- server/
@@ -119,13 +116,12 @@ The app does not recompute heavy prioritization logic on page load. The intended
 
 The frontend is in [`dais-health-access/client/src`](dais-health-access/client/src).
 
-Pages:
+The visible website is a single HospiShuttle page:
 
-- [`HomePage.tsx`](dais-health-access/client/src/pages/HomePage.tsx): overview shell for the hackathon demo.
-- [`FacilitiesPage.tsx`](dais-health-access/client/src/pages/FacilitiesPage.tsx): Lakebase-backed facility search, filters, result list, and details.
-- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): light-mode Leaflet/OpenStreetMap shuttle recommendation map with drag/zoom interaction, treatment selector, max saved-distance filter, highlighted district origins, route lines to destination facilities, route cards, route table, travel-saved metrics, and signal explanations.
+- [`App.tsx`](dais-health-access/client/src/App.tsx): light-mode single-page shell titled HospiShuttle. `/` and `/prioritization` render the same prioritization experience; retired paths redirect to `/`.
+- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): Leaflet/OpenStreetMap shuttle recommendation map with drag/zoom interaction, treatment selector, max saved-distance filter, highlighted district origins, route lines to destination facilities, route cards, route table, travel-saved metrics, and signal explanations.
 
-Navigation lives in [`App.tsx`](dais-health-access/client/src/App.tsx). Styling lives in [`index.css`](dais-health-access/client/src/index.css), with AppKit UI styles imported first.
+Styling lives in [`index.css`](dais-health-access/client/src/index.css), with AppKit UI styles imported first.
 
 ### Server
 
@@ -153,18 +149,18 @@ Tables:
 
 - `app_data.facilities_snapshot`
   - loaded by `scripts/load-facilities-snapshot.ts`
-  - powers the facilities explorer
+  - retained for data exploration and possible future admin workflows
 - `app_data.snapshot_runs`
   - records facility snapshot import runs
 - `app_data.shuttle_recommendations`
   - loaded by `scripts/load-recommendations-snapshot.ts`
-  - powers the prioritization page
+  - powers HospiShuttle
   - seeded by the server for demo safety if empty
-  - currently loaded with 250 `map_route_view` recommendation rows from the Python pipeline
+  - currently loaded with 250 `openai_continuous_symptom_mapping` recommendation rows from the Python pipeline
 - `app_data.symptom_mappings`
   - loaded by `scripts/load-symptom-mapping-snapshot.ts`
-  - stores one row per treatment with text justification and a JSONB map of all survey signals to `0` or `1`
-  - currently loaded with 25 OpenAI-generated treatment mappings
+  - stores one row per treatment with a JSONB map of continuous signal weights, directions, confidence values, and rationales
+  - currently loaded with 25 OpenAI-generated continuous treatment mappings
 
 ## Upstream Databricks Tables
 
@@ -504,8 +500,8 @@ npx vite preview --config client/vite.config.ts --host localhost --port 8000
 Then verify:
 
 - `/`
-- `/explorer`
 - `/prioritization`
+- retired paths such as `/explorer` redirect to `/`
 
 ## Databricks Bundle
 

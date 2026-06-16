@@ -1,39 +1,29 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-test('overview page renders the main experience shell', async ({ page }) => {
+test('HospiShuttle renders the prioritization experience at the root', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Health Access Atlas' })).toBeVisible();
-  await expect(
-    page.getByRole('heading', {
-      name: 'A polished facilities explorer on Lakebase, built for fast hackathon demos.',
-    }),
-  ).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Overview' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Explorer' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Prioritization' })).toBeVisible();
-});
-
-test('explorer page renders facility search controls', async ({ page }) => {
-  await page.goto('/explorer');
-
-  await expect(
-    page.getByRole('heading', {
-      name: 'Explore the healthcare access landscape with Lakebase-backed search and filtering.',
-    }),
-  ).toBeVisible();
-  await expect(page.getByPlaceholder('Search facilities, specialties, or cities')).toBeVisible();
-  await expect(page.getByText('Result set')).toBeVisible();
-});
-
-test('prioritization page renders the integrated pipeline view', async ({ page }) => {
-  await page.goto('/prioritization');
-
+  await expect(page).toHaveTitle(/HospiShuttle/);
+  await expect(page.getByRole('heading', { name: 'HospiShuttle' })).toBeVisible();
   await expect(
     page.getByRole('heading', {
       name: 'Select a treatment and route patients toward realistic specialty destinations.',
-    }),
+    })
   ).toBeVisible();
-  await expect(page.getByText('Precomputed recommendation table')).toBeVisible();
   await expect(page.getByText('Treatment focus')).toBeVisible();
+  await expect(page.getByText('Shuttle route map')).toBeVisible();
+});
+
+test('old prioritization path still opens HospiShuttle', async ({ page }) => {
+  await page.goto('/prioritization');
+
+  await expect(page.getByRole('heading', { name: 'HospiShuttle' })).toBeVisible();
+  await expect(page.getByText('Route prioritization')).toBeVisible();
+});
+
+test('retired explorer path redirects to HospiShuttle', async ({ page }) => {
+  await page.goto('/explorer');
+
+  await expect(page).toHaveURL('/');
+  await expect(page.getByRole('heading', { name: 'HospiShuttle' })).toBeVisible();
 });

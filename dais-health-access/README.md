@@ -1,8 +1,9 @@
-# dais-health-access
+# HospiShuttle
 
-A Databricks App powered by [AppKit](https://www.databricks.com/devhub/docs/appkit/v0/), featuring React, TypeScript, and Tailwind CSS.
+HospiShuttle is a Databricks App powered by [AppKit](https://www.databricks.com/devhub/docs/appkit/v0/), React, TypeScript, Tailwind CSS, and Lakebase. The visible website is intentionally focused on the shuttle-route prioritization page.
 
 **Enabled plugins:**
+
 - **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
 - **Server** -- Express HTTP server with static file serving and Vite dev mode
 
@@ -90,7 +91,7 @@ The app will be available at the URL shown in the console output.
 
 ### Shuttle Recommendation Refresh
 
-The prioritization page is served from the Lakebase table `app_data.shuttle_recommendations`.
+HospiShuttle is served from the Lakebase table `app_data.shuttle_recommendations`.
 On first app startup, the server creates that table and seeds a small demo snapshot so the UI works even before the full pipeline has run.
 
 For a pipeline-backed refresh:
