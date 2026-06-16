@@ -18,7 +18,7 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 250 pipeline rows across 25 treatments using the persisted Lakebase symptom mapping and corrected distance baseline.
+- Current recommendation serving table has 250 pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, and population-weighted priority scoring.
 - First production symptom mapping artifact exists in generated outputs with one row per treatment, 107 binary survey signal columns, and a text justification.
 
 Recent verification:
@@ -32,6 +32,7 @@ Recent verification:
 - Bounded Databricks-backed Python pipeline run succeeded with 3,000 facility rows, all 706 survey rows, and 50,000 pincode rows.
 - Full Databricks-backed Python pipeline run succeeded for top 25 treatments, strict OpenAI symptom mapping, 17,650 priority rows, and 250 app-serving recommendation rows.
 - Distance-fix refresh reused `app_data.symptom_mappings`, generated 250 recommendation rows, and loaded Lakebase with 178 distinct transportation burden reduction percentages.
+- Population-weighted refresh reused `app_data.symptom_mappings`, generated 250 recommendation rows, and loaded Lakebase with 179 distinct people-affected estimates ranging from 2,100 to 140,600.
 
 ## Demo Story
 
@@ -152,7 +153,7 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers the prioritization page
   - seeded by the server for demo safety if empty
-  - currently loaded with 250 `lakebase_symptom_mapping_distance_fix` recommendation rows from the Python pipeline
+  - currently loaded with 250 `population_weighted_priority` recommendation rows from the Python pipeline
 - `app_data.symptom_mappings`
   - loaded by `scripts/load-symptom-mapping-snapshot.ts`
   - stores one row per treatment with text justification and a JSONB map of all survey signals to `0` or `1`
@@ -250,6 +251,8 @@ The default demo-safe path can still use deterministic keyword fallback when an 
 The wide CSV/JSON artifacts keep every survey signal as a top-level `0` or `1` column for auditability. The Lakebase serving copy stores those same binary signals in `app_data.symptom_mappings.signal_mapping` as JSONB.
 
 Distance outputs are computed in priority scoring. The recommended distance is the nearest treatment-capable facility; the current distance is a modeled no-shuttle referral baseline chosen from the next farther treatment-capable facility for the same origin and treatment. This keeps `distance_saved_km` and `transportation_burden_reduction_pct` route-specific rather than a fixed multiplier.
+
+Population is estimated because the current source tables do not include census district population. The pipeline uses district pincode and post-office density from the pincode directory to allocate a national population estimate across districts, then applies a population weight to priority scoring. `estimated_people_affected` is derived from that estimated district population and the treatment demand percentile, so larger and higher-need districts rank higher without every row saturating at the same value.
 
 ## Notebooks
 
@@ -406,7 +409,7 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --output-dir outputs \
   --top-n-treatments 25 \
   --top-n-per-treatment 10 \
-  --snapshot-mode lakebase_symptom_mapping_distance_fix
+  --snapshot-mode population_weighted_priority
 ```
 
 For local CSV inputs:

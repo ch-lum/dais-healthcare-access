@@ -104,30 +104,30 @@ def _signals_for_treatment(symptom_mapping_df, treatment, max_signals=3):
     return signals[:max_signals]
 
 
-def _estimate_people(demand_score, treatment_rank, max_rank, config=None):
-    base_population = (
-        config.get("recommendations", {}).get("base_people_affected", 500)
-        if config
-        else 500
-    )
-    max_population = (
-        config.get("recommendations", {}).get("max_people_affected", 20000)
-        if config
-        else 20000
-    )
-    rank_factor = 1 - ((max(treatment_rank, 1) - 1) / max(max_rank, 1))
-    demand_factor = min(max(abs(demand_score) / 10, 0), 1)
-    estimate = base_population + (max_population - base_population) * max(rank_factor, demand_factor)
-    return int(round(estimate / 100) * 100)
+def _estimate_people(row, config=None):
+    recommendations_config = config.get("recommendations", {}) if config else {}
+    min_affected_pct = recommendations_config.get("min_affected_population_pct", 0.001)
+    max_affected_pct = recommendations_config.get("max_affected_population_pct", 0.02)
+    district_population = _safe_number(row.get("estimated_district_population"))
+    demand_percentile = min(max(_safe_number(row.get("demand_percentile"), 0.5), 0), 1)
+
+    if district_population <= 0:
+        district_population = recommendations_config.get("fallback_district_population", 1_500_000)
+
+    affected_pct = min_affected_pct + demand_percentile * (max_affected_pct - min_affected_pct)
+    estimate = district_population * affected_pct
+    return max(int(round(estimate / 100) * 100), 100)
 
 
 def _build_region_reason(row):
     demand_score = _safe_number(row.get("treatment_score"))
+    district_population = _safe_number(row.get("estimated_district_population"))
     current_distance = _safe_number(row.get("current_referral_distance_km"))
     recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
     distance_saved = _safe_number(row.get("distance_saved_km"))
     return (
-        f"Modeled demand is elevated for this treatment (score {demand_score:.1f}), "
+        f"Modeled demand is elevated for this treatment (score {demand_score:.1f}) in a district with "
+        f"an estimated population of {district_population:,.0f}, "
         f"and the coordinated route can reduce a likely referral trip from "
         f"{current_distance:.0f} km to {recommended_distance:.0f} km, saving about {distance_saved:.0f} km."
     )
@@ -192,7 +192,6 @@ def create_app_recommendations(
         .reset_index(drop=True)
     )
 
-    max_rank_by_treatment = ranked.groupby("treatment").size().to_dict()
     rows = []
 
     for _, row in ranked.iterrows():
@@ -215,8 +214,6 @@ def create_app_recommendations(
             row.get("transportation_burden_reduction_pct"),
             (distance_saved / current_distance) * 100 if current_distance > 0 else 0,
         )
-        treatment_rank = int(row.get("rank", 1)) if "rank" in row else 1
-        max_rank = max_rank_by_treatment.get(treatment, top_n_per_treatment)
         facility = _match_facility(supply_df, destination_name)
         signals = _signals_for_treatment(symptom_mapping_df, treatment)
 
@@ -262,12 +259,7 @@ def create_app_recommendations(
                 if facility is not None
                 else None,
                 "demand_score": round(_safe_number(row.get("treatment_score")), 3),
-                "estimated_people_affected": _estimate_people(
-                    _safe_number(row.get("treatment_score")),
-                    treatment_rank,
-                    max_rank,
-                    config=config,
-                ),
+                "estimated_people_affected": _estimate_people(row, config=config),
                 "current_distance_km": round(current_distance, 1),
                 "recommended_distance_km": round(recommended_distance, 1),
                 "distance_saved_km": round(distance_saved, 1),

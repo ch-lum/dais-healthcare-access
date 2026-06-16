@@ -95,6 +95,8 @@ def _load_inputs(config, args):
             SELECT
               district,
               statename,
+              pincode,
+              officename,
               TRY_CAST(latitude AS DOUBLE) AS latitude,
               TRY_CAST(longitude AS DOUBLE) AS longitude
             FROM {databricks_config["geo_reference_table"]}

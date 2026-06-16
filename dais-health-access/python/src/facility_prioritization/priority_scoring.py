@@ -24,6 +24,20 @@ def _transport_config(config):
     }
 
 
+def _population_config(config):
+    recommendations_config = config.get("recommendations", {}) if config else {}
+    return {
+        "national_population_estimate": recommendations_config.get(
+            "national_population_estimate",
+            1_210_000_000,
+        ),
+        "priority_population_exponent": recommendations_config.get(
+            "priority_population_exponent",
+            0.5,
+        ),
+    }
+
+
 def _select_current_referral_baseline(distances, names, recommended_index, config):
     recommended_distance = float(distances[recommended_index])
     settings = _transport_config(config)
@@ -45,21 +59,72 @@ def _select_current_referral_baseline(distances, names, recommended_index, confi
     return recommended_distance, names[recommended_index]
 
 
+def _estimate_district_populations(district_coords, config):
+    settings = _population_config(config)
+    proxy = (
+        district_coords["pincode_count"].fillna(0)
+        + district_coords["post_office_count"].fillna(0) * 0.25
+    ).clip(lower=1)
+    total_proxy = proxy.sum()
+
+    district_coords = district_coords.copy()
+    if total_proxy <= 0:
+        district_coords["estimated_district_population"] = np.nan
+        district_coords["population_weight"] = 1.0
+        return district_coords
+
+    district_coords["estimated_district_population"] = (
+        proxy / total_proxy
+    ) * settings["national_population_estimate"]
+    median_population = district_coords["estimated_district_population"].median()
+    if median_population <= 0 or pd.isna(median_population):
+        district_coords["population_weight"] = 1.0
+    else:
+        district_coords["population_weight"] = (
+            district_coords["estimated_district_population"] / median_population
+        ).pow(settings["priority_population_exponent"])
+    district_coords["population_proxy_source"] = "pincode_and_post_office_density"
+    return district_coords
+
+
 def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, **kwargs):
     warnings = []
 
     geo_df = geo_reference_df.copy()
+    if "pincode" not in geo_df.columns:
+        geo_df["pincode"] = geo_df["district"]
+    if "officename" not in geo_df.columns:
+        geo_df["officename"] = geo_df["pincode"]
     geo_df["district_clean"] = geo_df["district"].apply(clean_district_name)
     geo_df["latitude_num"] = pd.to_numeric(geo_df["latitude"], errors="coerce")
     geo_df["longitude_num"] = pd.to_numeric(geo_df["longitude"], errors="coerce")
 
     district_coords = (
         geo_df.groupby("district_clean")
-        .agg({"latitude_num": "median", "longitude_num": "median", "statename": "first"})
+        .agg(
+            {
+                "latitude_num": "median",
+                "longitude_num": "median",
+                "statename": "first",
+                "pincode": "nunique",
+                "officename": "nunique",
+            }
+        )
         .reset_index()
     )
-    district_coords.columns = ["district_name", "district_lat", "district_lon", "district_state"]
+    district_coords.columns = [
+        "district_name",
+        "district_lat",
+        "district_lon",
+        "district_state",
+        "pincode_count",
+        "post_office_count",
+    ]
+    district_coords = _estimate_district_populations(district_coords, config)
     warnings.append(f"Aggregated geo reference to {len(district_coords)} unique districts")
+    warnings.append(
+        "Estimated district populations from pincode/post-office density because source tables do not include census population"
+    )
 
     demand_with_coords = demand_df.copy()
     demand_with_coords["district_name_clean"] = demand_with_coords["district_name"].apply(clean_district_name)
@@ -70,6 +135,18 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         how="left",
         suffixes=("", "_coord"),
     )
+    if "rank" in demand_with_coords.columns:
+        max_rank = demand_with_coords.groupby("treatment")["rank"].transform("max").clip(lower=1)
+        demand_with_coords["demand_percentile"] = 1 - (
+            (demand_with_coords["rank"].clip(lower=1) - 1) / max_rank
+        )
+    else:
+        demand_with_coords["rank"] = demand_with_coords.groupby("treatment")[
+            "treatment_score"
+        ].rank(ascending=False, method="min")
+        demand_with_coords["demand_percentile"] = demand_with_coords.groupby("treatment")[
+            "treatment_score"
+        ].rank(pct=True)
 
     matched = demand_with_coords["district_lat"].notna().sum()
     total = len(demand_with_coords)
@@ -158,6 +235,7 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         demand_with_coords["treatment_score"]
         * demand_with_coords["effective_distance"]
         * (1 + demand_with_coords["transportation_burden_reduction_pct"].fillna(0) / 100)
+        * demand_with_coords["population_weight"].fillna(1)
     )
 
     priority_df = demand_with_coords[
@@ -166,6 +244,11 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
             "state_ut",
             "treatment",
             "treatment_score",
+            "rank",
+            "demand_percentile",
+            "estimated_district_population",
+            "population_weight",
+            "population_proxy_source",
             "current_referral_distance_km",
             "current_referral_facility_name",
             "distance_to_nearest_facility_km",
