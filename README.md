@@ -18,7 +18,8 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 25 pipeline-generated demo rows across 5 treatments.
+- Current recommendation serving table has 250 OpenAI-mapped pipeline rows across 25 treatments.
+- First production symptom mapping artifact exists in generated outputs with one row per treatment, 107 binary survey signal columns, and a text justification.
 
 Recent verification:
 
@@ -29,6 +30,7 @@ Recent verification:
 - Production frontend preview smoke check passed in local Google Chrome for `/`, `/explorer`, and `/prioritization`.
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
 - Bounded Databricks-backed Python pipeline run succeeded with 3,000 facility rows, all 706 survey rows, and 50,000 pincode rows.
+- Full Databricks-backed Python pipeline run succeeded for top 25 treatments, strict OpenAI symptom mapping, 17,650 priority rows, and 250 app-serving recommendation rows.
 
 ## Demo Story
 
@@ -147,7 +149,7 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers the prioritization page
   - seeded by the server for demo safety if empty
-  - currently loaded with 25 `databricks_demo` recommendation rows from the Python pipeline
+  - currently loaded with 250 `openai_symptom_mapping` recommendation rows from the Python pipeline
 
 ## Upstream Databricks Tables
 
@@ -166,11 +168,12 @@ Verified row counts:
 - `nfhs_5_district_health_indicators`: 706 rows
 - `india_post_pincode_directory`: 165,627 rows
 
-For the current demo run, the pipeline used a bounded sample:
+For the first OpenAI-mapped production symptom run, the pipeline used:
 
-- facilities: 3,000 India facilities with valid coordinate bounds
-- survey: all rows
-- pincode/geography: 50,000 rows with valid India coordinate bounds
+- facilities: 9,964 India facilities with valid coordinate bounds and narrowed text projection
+- survey: all 706 district survey rows, cleaned to 107 numeric signal columns plus identifiers
+- pincode/geography: full valid India coordinate projection aggregated to 750 unique districts
+- recommendations: top 25 treatments, 10 recommendation rows per treatment
 
 ## Recommendation Data Model
 
@@ -227,9 +230,15 @@ Pipeline stages:
 
 Config lives in [`dais-health-access/python/config/config.yaml`](dais-health-access/python/config/config.yaml).
 
-The OpenAI-based survey-signal mapping path still exists, but the default demo-safe path can use deterministic keyword fallback when an API key is unavailable.
+The OpenAI-based survey-signal mapping path now validates a production table shape:
 
-The current loaded demo used deterministic fallback symptom mapping. A persisted symptom mapping table is still a future productionization step; conceptually it should be generated once and reused until treatment/survey signal definitions change.
+- one row per treatment
+- one binary `0` or `1` column per survey signal
+- text `justification`
+- selected signal count
+- mapping source, model, and update timestamp
+
+The default demo-safe path can still use deterministic keyword fallback when an API key is unavailable. Generated symptom mapping artifacts are written to `outputs/symptom_mapping.csv` and `outputs/symptom_mapping.json`; conceptually this table should be generated once and reused until treatment/survey signal definitions change.
 
 ## Notebooks
 
@@ -353,6 +362,30 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --output-dir outputs
 ```
 
+Run the current OpenAI-backed top-25 production mapping and recommendation refresh:
+
+```bash
+PYTHONPATH=python/src python -m facility_prioritization.pipeline \
+  --databricks-profile dais-health \
+  --output-format both \
+  --output-dir outputs \
+  --top-n-treatments 25 \
+  --top-n-per-treatment 10 \
+  --snapshot-mode openai_symptom_mapping \
+  --use-openai-mapping \
+  --strict-openai-mapping
+```
+
+Reuse an existing symptom mapping table instead of regenerating it:
+
+```bash
+PYTHONPATH=python/src python -m facility_prioritization.pipeline \
+  --databricks-profile dais-health \
+  --symptom-mapping-csv outputs/symptom_mapping.csv \
+  --output-format both \
+  --output-dir outputs
+```
+
 For local CSV inputs:
 
 ```bash
@@ -458,9 +491,10 @@ databricks bundle validate --profile dais-health
 Current recent project commits:
 
 ```text
+e26a008 Update README with Databricks pipeline run
+e801480 Fix Databricks app Linux package install
+ea1d857 Run prioritization pipeline on Databricks sources
 5e04e4d Point bundle at authenticated workspace
 593b804 Add recommendation snapshot refresh path
 3431588 Add app-facing recommendation pipeline output
-5a0044a Build shuttle recommendation UI
-c7a2c1f Add Lakebase shuttle recommendation API
 ```

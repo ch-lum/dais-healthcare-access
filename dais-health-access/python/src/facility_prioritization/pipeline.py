@@ -51,7 +51,6 @@ def _load_inputs(config, args):
               organization_type,
               officialPhone,
               officialWebsite,
-              email,
               address_city,
               address_stateOrRegion AS address_state_or_region,
               address_country,
@@ -59,11 +58,10 @@ def _load_inputs(config, args):
               specialties,
               procedure,
               equipment,
-              description,
+              SUBSTRING(description, 1, 500) AS description,
               latitude,
               longitude,
-              source,
-              source_urls
+              source
             FROM {databricks_config["facility_table"]}
             WHERE unique_id IS NOT NULL
               AND latitude IS NOT NULL
@@ -116,23 +114,46 @@ def _load_inputs(config, args):
     return facility_df, survey_df, geo_df
 
 
-def _write_outputs(output_dir, output_base, app_recommendations_df, priority_df, output_format):
+def _write_outputs(
+    output_dir,
+    output_base,
+    app_recommendations_df,
+    priority_df,
+    symptom_mapping_df,
+    output_format,
+    symptom_mapping_base,
+):
     output_dir.mkdir(parents=True, exist_ok=True)
     written = []
 
     if output_format in {"csv", "both"}:
         app_csv = output_dir / f"{output_base}.csv"
         priority_csv = output_dir / "priority_table.csv"
+        symptom_mapping_csv = output_dir / f"{symptom_mapping_base}.csv"
         app_recommendations_df.to_csv(app_csv, index=False)
         priority_df.to_csv(priority_csv, index=False)
-        written.extend([str(app_csv), str(priority_csv)])
+        symptom_mapping_df.reset_index().to_csv(symptom_mapping_csv, index=False)
+        written.extend([str(app_csv), str(priority_csv), str(symptom_mapping_csv)])
 
     if output_format in {"json", "both"}:
         app_json = output_dir / f"{output_base}.json"
+        symptom_mapping_json = output_dir / f"{symptom_mapping_base}.json"
         app_recommendations_df.to_json(app_json, orient="records", indent=2)
-        written.append(str(app_json))
+        symptom_mapping_df.reset_index().to_json(
+            symptom_mapping_json,
+            orient="records",
+            indent=2,
+        )
+        written.extend([str(app_json), str(symptom_mapping_json)])
 
     return written
+
+
+def _load_symptom_mapping(path):
+    mapping_df = pd.read_csv(path)
+    if "treatment" not in mapping_df.columns:
+        raise ValueError("Symptom mapping CSV must include a 'treatment' column")
+    return mapping_df.set_index("treatment")
 
 
 def run_pipeline(args):
@@ -160,12 +181,16 @@ def run_pipeline(args):
     cleaned_survey_df, stage_warnings = clean_survey_data(survey_df, config=config)
     warnings.extend(stage_warnings)
 
-    if args.use_openai_mapping:
+    if args.symptom_mapping_csv:
+        symptom_mapping_df = _load_symptom_mapping(args.symptom_mapping_csv)
+        stage_warnings = [f"Loaded existing symptom mapping from {args.symptom_mapping_csv}"]
+    elif args.use_openai_mapping:
         symptom_mapping_df, stage_warnings = generate_symptom_mapping(
             top_treatments,
             cleaned_survey_df.columns,
             config=config,
-            fallback_on_missing_key=True,
+            fallback_on_missing_key=not args.strict_openai_mapping,
+            strict=args.strict_openai_mapping,
         )
     else:
         symptom_mapping_df, stage_warnings = generate_fallback_symptom_mapping(
@@ -204,12 +229,15 @@ def run_pipeline(args):
         "app_recommendations_filename",
         "app_recommendations",
     ).removesuffix(".csv")
+    symptom_mapping_base = args.symptom_mapping_output_base or "symptom_mapping"
     written = _write_outputs(
         output_dir,
         output_base,
         app_recommendations_df,
         priority_df,
+        symptom_mapping_df,
         args.output_format,
+        symptom_mapping_base,
     )
 
     return {
@@ -234,14 +262,28 @@ def build_parser():
     parser.add_argument("--geo-limit", type=int, default=None, help="Optional geography row limit for demo runs")
     parser.add_argument("--output-dir", help="Directory for recommendation outputs")
     parser.add_argument("--output-base", help="Base filename for app recommendation output")
+    parser.add_argument(
+        "--symptom-mapping-output-base",
+        default="symptom_mapping",
+        help="Base filename for the generated treatment-to-survey symptom mapping output",
+    )
     parser.add_argument("--output-format", choices=["csv", "json", "both"], default="csv")
     parser.add_argument("--top-n-treatments", type=int, default=None)
     parser.add_argument("--top-n-per-treatment", type=int, default=10)
     parser.add_argument("--snapshot-mode", default="pipeline")
     parser.add_argument(
+        "--symptom-mapping-csv",
+        help="Reuse an existing symptom mapping CSV instead of generating a new one",
+    )
+    parser.add_argument(
         "--use-openai-mapping",
         action="store_true",
         help="Use OpenAI treatment-to-survey mapping when an API key is available; otherwise fallback is used.",
+    )
+    parser.add_argument(
+        "--strict-openai-mapping",
+        action="store_true",
+        help="Fail the pipeline if OpenAI mapping generation returns malformed or incomplete output.",
     )
     return parser
 

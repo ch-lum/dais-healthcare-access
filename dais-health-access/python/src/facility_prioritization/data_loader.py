@@ -31,10 +31,15 @@ def _load_with_databricks_cli(table_name, profile=None, limit=None, sql=None):
 
     completed = subprocess.run(
         args,
-        check=True,
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(
+            f"Databricks CLI query failed for {table_name}: {details}"
+        )
+
     rows = json.loads(completed.stdout)
     return pd.DataFrame(rows)
 

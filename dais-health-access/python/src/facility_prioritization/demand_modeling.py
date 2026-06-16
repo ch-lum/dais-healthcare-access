@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -23,8 +24,52 @@ FALLBACK_SIGNAL_KEYWORDS = {
 }
 
 
+MAPPING_METADATA_COLUMNS = {
+    "reasoning",
+    "justification",
+    "selected_signal_count",
+    "mapping_source",
+    "model",
+    "updated_at",
+}
+
+
 def _normalize_column_name(column):
     return str(column).lower().replace("_", " ").replace("-", " ")
+
+
+def _survey_data_columns(survey_columns, config=None):
+    preserve_cols = (
+        config.get("survey", {}).get("preserve_columns", ["district_name", "state_ut"])
+        if config
+        else ["district_name", "state_ut"]
+    )
+    return [col for col in survey_columns if col not in preserve_cols]
+
+
+def _resolve_openai_api_key(api_key=None, config=None):
+    warnings = []
+    if api_key:
+        return api_key, warnings
+
+    openai_config = config.get("openai", {}) if config else {}
+    configured_key = openai_config.get("api_key")
+    if configured_key:
+        return configured_key, warnings
+
+    api_key_env = openai_config.get("api_key_env_var", "OPENAI_API_KEY")
+    if api_key_env and str(api_key_env).startswith("sk-"):
+        warnings.append(
+            "OpenAI config value 'api_key_env_var' appears to contain a direct API key; "
+            "prefer moving it to an environment variable before committing config."
+        )
+        return api_key_env, warnings
+
+    env_key = os.getenv(api_key_env or "OPENAI_API_KEY")
+    if env_key:
+        return env_key, warnings
+
+    return None, warnings
 
 
 def _keywords_for_treatment(treatment):
@@ -42,14 +87,10 @@ def _keywords_for_treatment(treatment):
 def generate_fallback_symptom_mapping(treatment_list, survey_columns, config=None, **kwargs):
     """Create deterministic treatment-to-survey mappings when LLM mapping is unavailable."""
     warnings = []
-    preserve_cols = (
-        config.get("survey", {}).get("preserve_columns", ["district_name", "state_ut"])
-        if config
-        else ["district_name", "state_ut"]
-    )
-    data_columns = [col for col in survey_columns if col not in preserve_cols]
+    data_columns = _survey_data_columns(survey_columns, config=config)
     max_columns = kwargs.get("max_columns", 12)
     mapping_data = []
+    updated_at = datetime.now(timezone.utc).isoformat()
 
     for treatment in treatment_list:
         keywords = _keywords_for_treatment(treatment)
@@ -68,6 +109,11 @@ def generate_fallback_symptom_mapping(treatment_list, survey_columns, config=Non
         row = {
             "treatment": treatment,
             "reasoning": "Deterministic keyword fallback used for fast app-serving recommendation generation.",
+            "justification": "Deterministic keyword fallback matched survey columns whose names resemble the treatment or known access-demand proxies.",
+            "selected_signal_count": len(selected_columns),
+            "mapping_source": "fallback_keyword",
+            "model": None,
+            "updated_at": updated_at,
         }
         row.update({col: 1 if col in selected_columns else 0 for col in data_columns})
         mapping_data.append(row)
@@ -77,15 +123,58 @@ def generate_fallback_symptom_mapping(treatment_list, survey_columns, config=Non
     return mapping_df, warnings
 
 
+def _parse_json_object(content):
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.removeprefix("```json").removeprefix("```").strip()
+        stripped = stripped.removesuffix("```").strip()
+    return json.loads(stripped)
+
+
+def _coerce_openai_mapping_result(result, treatment, data_columns, model, updated_at):
+    selected = result.get("selected_signal_columns")
+    if selected is None and "column_mapping" in result:
+        selected = [
+            column
+            for column, value in result["column_mapping"].items()
+            if int(value) == 1 and column in data_columns
+        ]
+
+    if not isinstance(selected, list):
+        raise ValueError("Expected 'selected_signal_columns' to be a JSON array")
+
+    valid_columns = set(data_columns)
+    selected_columns = []
+    unknown_columns = []
+    for column in selected:
+        column_name = str(column)
+        if column_name in valid_columns and column_name not in selected_columns:
+            selected_columns.append(column_name)
+        elif column_name not in valid_columns:
+            unknown_columns.append(column_name)
+
+    justification = str(result.get("justification") or result.get("reasoning") or "").strip()
+    if not justification:
+        raise ValueError("Expected non-empty 'justification' text")
+
+    row = {
+        "treatment": treatment,
+        "reasoning": justification,
+        "justification": justification,
+        "selected_signal_count": len(selected_columns),
+        "mapping_source": "openai",
+        "model": model,
+        "updated_at": updated_at,
+    }
+    row.update({column: 1 if column in selected_columns else 0 for column in data_columns})
+    return row, unknown_columns
+
+
 def generate_symptom_mapping(treatment_list, survey_columns, api_key=None, config=None, **kwargs):
     warnings = []
 
-    if api_key is None:
-        if config:
-            api_key_env = config.get("openai", {}).get("api_key_env_var", "OPENAI_API_KEY")
-            api_key = os.getenv(api_key_env)
-        else:
-            api_key = os.getenv("OPENAI_API_KEY")
+    api_key, key_warnings = _resolve_openai_api_key(api_key=api_key, config=config)
+    warnings.extend(key_warnings)
 
     if not api_key:
         fallback_enabled = kwargs.get(
@@ -132,56 +221,76 @@ def generate_symptom_mapping(treatment_list, survey_columns, api_key=None, confi
         "temperature",
         config.get("openai", {}).get("temperature", 0.3) if config else 0.3,
     )
+    strict = kwargs.get("strict", False)
 
     client = openai.OpenAI(api_key=api_key)
-    data_columns = [col for col in survey_columns if col not in ["district_name", "state_ut"]]
+    data_columns = _survey_data_columns(survey_columns, config=config)
     mapping_data = []
+    updated_at = datetime.now(timezone.utc).isoformat()
 
     for treatment in treatment_list:
         try:
-            prompt = f"""You are a healthcare data analyst. Given a treatment and a list of survey columns, identify which columns indicate regional need for that treatment.
+            prompt = f"""You are creating a production treatment-to-survey-signal mapping table for a healthcare access and shuttle coordination app.
 
-Treatment: {treatment}
+Treatment:
+{treatment}
 
-Survey columns:
-{', '.join(data_columns[:100])}  # Limit to first 100 columns
+Survey signal columns, as a JSON array:
+{json.dumps(data_columns, ensure_ascii=True)}
 
-For each column, return 1 if it indicates need for this treatment, 0 otherwise.
+Task:
+Choose the survey signal columns that are direct or strong proxy indicators of regional need for this treatment. Include prevalence, screening gaps, treatment/service utilization gaps, risk factors, maternal/child indicators, or access-barrier indicators when medically relevant. Exclude identifiers, geography-only fields, and unrelated health topics.
 
-Respond ONLY with valid JSON in this exact format:
+Return ONLY valid JSON in this exact shape:
 {{
-  "column_mapping": {{
-    "column_name_1": 0,
-    "column_name_2": 1,
-    ...
-  }},
-  "reasoning": "Brief explanation of why certain columns were selected"
+  "selected_signal_columns": ["exact_column_name"],
+  "justification": "Two to four sentences explaining why these survey signals indicate likely unmet need for the treatment."
 }}
 
-Do NOT include any text before or after the JSON."""
+Use exact column names from the provided array. Do not invent columns."""
 
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
+                response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content.strip()
 
             try:
-                result = json.loads(content)
-                row = {"treatment": treatment, "reasoning": result.get("reasoning", "")}
-                row.update(result.get("column_mapping", {}))
+                result = _parse_json_object(content)
+                row, unknown_columns = _coerce_openai_mapping_result(
+                    result,
+                    treatment,
+                    data_columns,
+                    model,
+                    updated_at,
+                )
+                if unknown_columns:
+                    warnings.append(
+                        f"Ignored {len(unknown_columns)} unknown survey columns for treatment '{treatment}'"
+                    )
                 mapping_data.append(row)
-            except json.JSONDecodeError as exc:
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                if strict:
+                    raise RuntimeError(
+                        f"Failed to create validated OpenAI symptom mapping for treatment '{treatment}'"
+                    ) from exc
                 warnings.append(f"Failed to parse JSON for treatment '{treatment}': {exc}")
                 mapping_data.append({"treatment": treatment, "reasoning": "PARSE_ERROR"})
 
         except Exception as exc:  # noqa: BLE001
+            if strict:
+                raise
             warnings.append(f"API call failed for treatment '{treatment}': {exc}")
             mapping_data.append({"treatment": treatment, "reasoning": "API_ERROR"})
 
     mapping_df = pd.DataFrame(mapping_data).set_index("treatment").fillna(0)
+    for column in data_columns:
+        if column not in mapping_df.columns:
+            mapping_df[column] = 0
+        mapping_df[column] = pd.to_numeric(mapping_df[column], errors="coerce").fillna(0).astype(int)
     warnings.append(f"Generated symptom mapping for {len(treatment_list)} treatments")
     return mapping_df, warnings
 
@@ -207,7 +316,9 @@ def calculate_treatment_scores(cleaned_survey_df, symptom_mapping_df, config=Non
 
     scores_dict = {}
     for treatment in symptom_mapping_df.index:
-        relevance_cols = [col for col in symptom_mapping_df.columns if col != "reasoning"]
+        relevance_cols = [
+            col for col in symptom_mapping_df.columns if col not in MAPPING_METADATA_COLUMNS
+        ]
         relevance_vector = symptom_mapping_df.loc[treatment, relevance_cols]
         common_cols = list(set(scaled_df.columns).intersection(set(relevance_vector.index)))
 
