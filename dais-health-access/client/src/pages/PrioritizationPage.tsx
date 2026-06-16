@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import type * as Leaflet from 'leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
 import {
   Alert,
   AlertDescription,
@@ -182,41 +184,6 @@ function hasRouteCoordinates(recommendation: ShuttleRecommendation) {
   );
 }
 
-function mapCoordinateBounds(recommendations: ShuttleRecommendation[]) {
-  const coordinates = recommendations
-    .filter(hasRouteCoordinates)
-    .flatMap((recommendation) => [
-      {
-        lat: toNumber(recommendation.origin_latitude),
-        lon: toNumber(recommendation.origin_longitude),
-      },
-      {
-        lat: toNumber(recommendation.destination_latitude),
-        lon: toNumber(recommendation.destination_longitude),
-      },
-    ]);
-
-  if (coordinates.length === 0) {
-    return { minLat: 6, maxLat: 38, minLon: 68, maxLon: 98 };
-  }
-
-  const lats = coordinates.map((coordinate) => coordinate.lat);
-  const lons = coordinates.map((coordinate) => coordinate.lon);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
-  const latPad = Math.max((maxLat - minLat) * 0.18, 1.8);
-  const lonPad = Math.max((maxLon - minLon) * 0.18, 1.8);
-
-  return {
-    minLat: Math.max(5, minLat - latPad),
-    maxLat: Math.min(39, maxLat + latPad),
-    minLon: Math.max(66, minLon - lonPad),
-    maxLon: Math.min(99, maxLon + lonPad),
-  };
-}
-
 async function fetchJson<T>(url: string, options?: RequestInit) {
   const response = await fetch(url, options);
   const payload = (await response.json()) as T | { error?: string; guidance?: string };
@@ -324,24 +291,168 @@ function RouteMapView({
   selectedRecommendation: ShuttleRecommendation | null;
   onSelect: (id: string) => void;
 }) {
-  const drawableRecommendations = recommendations.filter(hasRouteCoordinates);
-  const bounds = mapCoordinateBounds(drawableRecommendations);
-  const width = 920;
-  const height = 560;
-  const padding = 48;
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<Leaflet.Map | null>(null);
+  const routeLayerRef = useRef<Leaflet.LayerGroup | null>(null);
+  const leafletRef = useRef<typeof Leaflet | null>(null);
+  const drawableRecommendations = useMemo(() => recommendations.filter(hasRouteCoordinates), [recommendations]);
+  const selected =
+    selectedRecommendation && hasRouteCoordinates(selectedRecommendation)
+      ? selectedRecommendation
+      : drawableRecommendations[0] ?? null;
 
-  function project(latValue: number | string | null, lonValue: number | string | null) {
-    const lat = toNumber(latValue);
-    const lon = toNumber(lonValue);
-    const x =
-      padding +
-      ((lon - bounds.minLon) / Math.max(bounds.maxLon - bounds.minLon, 1)) * (width - padding * 2);
-    const y =
-      padding +
-      ((bounds.maxLat - lat) / Math.max(bounds.maxLat - bounds.minLat, 1)) * (height - padding * 2);
+  useEffect(() => {
+    let active = true;
 
-    return { x, y };
-  }
+    async function initializeMap() {
+      if (!mapContainerRef.current || mapRef.current) {
+        return;
+      }
+
+      const leaflet = await import('leaflet');
+      if (!active || !mapContainerRef.current) {
+        return;
+      }
+
+      leafletRef.current = leaflet;
+      const map = leaflet
+        .map(mapContainerRef.current, {
+          center: [22.9, 79.6],
+          zoom: 5,
+          minZoom: 4,
+          maxZoom: 10,
+          scrollWheelZoom: true,
+          zoomControl: true,
+        })
+        .setMaxBounds([
+          [4, 64],
+          [39, 100],
+        ]);
+
+      leaflet
+        .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
+          maxZoom: 19,
+        })
+        .addTo(map);
+
+      routeLayerRef.current = leaflet.layerGroup().addTo(map);
+      mapRef.current = map;
+    }
+
+    void initializeMap();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const leaflet = leafletRef.current;
+    const routeLayer = routeLayerRef.current;
+
+    if (!map || !leaflet || !routeLayer) {
+      return;
+    }
+
+    routeLayer.clearLayers();
+
+    drawableRecommendations.forEach((recommendation) => {
+      const selectedRoute = recommendation.id === selected?.id;
+      const origin: Leaflet.LatLngExpression = [
+        toNumber(recommendation.origin_latitude),
+        toNumber(recommendation.origin_longitude),
+      ];
+      const destination: Leaflet.LatLngExpression = [
+        toNumber(recommendation.destination_latitude),
+        toNumber(recommendation.destination_longitude),
+      ];
+      const line = leaflet
+        .polyline([origin, destination], {
+          color: selectedRoute ? '#ff3621' : '#2f7d64',
+          weight: selectedRoute ? 5 : 2,
+          opacity: selectedRoute ? 0.95 : 0.36,
+        })
+        .bindTooltip(`${recommendation.origin_region} to ${recommendation.destination_facility_name}`)
+        .on('click', () => onSelect(recommendation.id));
+      const originMarker = leaflet
+        .circleMarker(origin, {
+          radius: selectedRoute ? 10 : 6,
+          color: selectedRoute ? '#ff3621' : '#0f7a5f',
+          fillColor: selectedRoute ? '#ff3621' : '#0f7a5f',
+          fillOpacity: selectedRoute ? 0.95 : 0.7,
+          weight: selectedRoute ? 3 : 1,
+        })
+        .bindPopup(
+          `<strong>${recommendation.origin_region}</strong><br/>${formatLocation([
+            recommendation.origin_state,
+          ])}<br/>${formatDistance(recommendation.distance_saved_km)} saved`,
+        )
+        .on('click', () => onSelect(recommendation.id));
+      const destinationMarker = leaflet
+        .circleMarker(destination, {
+          radius: selectedRoute ? 8 : 5,
+          color: selectedRoute ? '#0b2026' : '#52645f',
+          fillColor: selectedRoute ? '#0b2026' : '#52645f',
+          fillOpacity: selectedRoute ? 0.95 : 0.62,
+          weight: selectedRoute ? 3 : 1,
+        })
+        .bindPopup(
+          `<strong>${recommendation.destination_facility_name}</strong><br/>${formatLocation([
+            recommendation.destination_city,
+            recommendation.destination_state,
+          ])}`,
+        )
+        .on('click', () => onSelect(recommendation.id));
+
+      line.addTo(routeLayer);
+      originMarker.addTo(routeLayer);
+      destinationMarker.addTo(routeLayer);
+    });
+
+    if (selected) {
+      const selectedBounds = leaflet.latLngBounds(
+        [
+          [
+            toNumber(selected.origin_latitude),
+            toNumber(selected.origin_longitude),
+          ],
+          [
+            toNumber(selected.destination_latitude),
+            toNumber(selected.destination_longitude),
+          ],
+        ] as Leaflet.LatLngExpression[],
+      );
+      map.fitBounds(selectedBounds.pad(0.75), {
+        animate: true,
+        maxZoom: 7,
+      });
+    } else if (drawableRecommendations.length > 0) {
+      const allPoints = drawableRecommendations.flatMap((recommendation) => [
+        [
+          toNumber(recommendation.origin_latitude),
+          toNumber(recommendation.origin_longitude),
+        ],
+        [
+          toNumber(recommendation.destination_latitude),
+          toNumber(recommendation.destination_longitude),
+        ],
+      ]) as Leaflet.LatLngExpression[];
+      map.fitBounds(leaflet.latLngBounds(allPoints).pad(0.2), {
+        animate: true,
+        maxZoom: 6,
+      });
+    }
+  }, [drawableRecommendations, onSelect, selected]);
+
+  useEffect(() => {
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+      routeLayerRef.current = null;
+    };
+  }, []);
 
   if (drawableRecommendations.length === 0) {
     return (
@@ -363,10 +474,6 @@ function RouteMapView({
     );
   }
 
-  const selected = selectedRecommendation && hasRouteCoordinates(selectedRecommendation) ? selectedRecommendation : drawableRecommendations[0];
-  const selectedOrigin = project(selected.origin_latitude, selected.origin_longitude);
-  const selectedDestination = project(selected.destination_latitude, selected.destination_longitude);
-
   return (
     <Card className="overflow-hidden border-border/60 bg-card/95 shadow-none">
       <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
@@ -382,126 +489,27 @@ function RouteMapView({
         <Badge variant="outline">{drawableRecommendations.length} mapped routes</Badge>
       </CardHeader>
       <CardContent>
-        <div className="relative overflow-hidden rounded-lg border border-border/60 bg-[#f7fbf8]">
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            role="img"
-            aria-label="Map of district-to-facility shuttle routes"
-            className="h-[30rem] w-full"
+        <div className="relative overflow-hidden rounded-lg border border-border/60 bg-[#eef4f0]">
+          <div ref={mapContainerRef} className="h-[32rem] w-full" aria-label="Interactive India route map" />
+          <div className="absolute left-4 top-4 max-w-xs rounded-lg border border-border/60 bg-card/95 p-3 text-sm shadow-sm">
+            <p className="font-semibold text-foreground">{selected?.origin_region}</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {selected
+                ? `${formatDistance(selected.distance_saved_km)} saved to ${selected.destination_facility_name}`
+                : 'Select a route'}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="absolute right-4 top-4"
+            onClick={() => {
+              mapRef.current?.setView([22.9, 79.6], 5, { animate: true });
+            }}
           >
-            <defs>
-              <pattern id="map-grid" width="46" height="46" patternUnits="userSpaceOnUse">
-                <path d="M 46 0 L 0 0 0 46" fill="none" stroke="#dbe7df" strokeWidth="1" />
-              </pattern>
-              <filter id="route-shadow" x="-20%" y="-20%" width="140%" height="140%">
-                <feDropShadow dx="0" dy="4" stdDeviation="5" floodColor="#0b2026" floodOpacity="0.18" />
-              </filter>
-            </defs>
-
-            <rect width={width} height={height} fill="#f7fbf8" />
-            <rect width={width} height={height} fill="url(#map-grid)" opacity="0.65" />
-            <path
-              d="M230 58 C365 28 565 50 704 132 C802 190 836 302 787 404 C732 518 562 548 392 511 C222 475 110 364 132 240 C146 154 169 91 230 58Z"
-              fill="#e7f3eb"
-              stroke="#b7d2c0"
-              strokeWidth="2"
-              opacity="0.85"
-            />
-
-            {drawableRecommendations.map((recommendation) => {
-              const origin = project(recommendation.origin_latitude, recommendation.origin_longitude);
-              const destination = project(recommendation.destination_latitude, recommendation.destination_longitude);
-              const selectedRoute = recommendation.id === selected.id;
-
-              return (
-                <g
-                  key={recommendation.id}
-                  role="button"
-                  tabIndex={0}
-                  className="cursor-pointer"
-                  onClick={() => onSelect(recommendation.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onSelect(recommendation.id);
-                    }
-                  }}
-                >
-                    <line
-                      x1={origin.x}
-                      y1={origin.y}
-                      x2={destination.x}
-                      y2={destination.y}
-                      stroke={selectedRoute ? '#ff3621' : '#4f8f75'}
-                      strokeWidth={selectedRoute ? 5 : 2}
-                      strokeLinecap="round"
-                      opacity={selectedRoute ? 0.95 : 0.28}
-                      filter={selectedRoute ? 'url(#route-shadow)' : undefined}
-                    />
-                    <circle
-                      cx={origin.x}
-                      cy={origin.y}
-                      r={selectedRoute ? 13 : 6}
-                      fill={selectedRoute ? '#ff3621' : '#0f7a5f'}
-                      opacity={selectedRoute ? 0.95 : 0.65}
-                    />
-                    <rect
-                      x={destination.x - (selectedRoute ? 8 : 5)}
-                      y={destination.y - (selectedRoute ? 8 : 5)}
-                      width={selectedRoute ? 16 : 10}
-                      height={selectedRoute ? 16 : 10}
-                      rx="3"
-                      fill={selectedRoute ? '#0b2026' : '#64746f'}
-                      opacity={selectedRoute ? 0.95 : 0.58}
-                    />
-                    <title>
-                      {recommendation.origin_region} to {recommendation.destination_facility_name}
-                    </title>
-                </g>
-              );
-            })}
-
-            <circle
-              cx={selectedOrigin.x}
-              cy={selectedOrigin.y}
-              r="30"
-              fill="none"
-              stroke="#ff3621"
-              strokeWidth="3"
-              strokeDasharray="7 7"
-              opacity="0.82"
-            />
-            <line
-              x1={selectedOrigin.x}
-              y1={selectedOrigin.y}
-              x2={selectedDestination.x}
-              y2={selectedDestination.y}
-              stroke="#ff3621"
-              strokeWidth="6"
-              strokeLinecap="round"
-              opacity="0.9"
-            />
-            <circle cx={selectedOrigin.x} cy={selectedOrigin.y} r="11" fill="#ff3621" />
-            <rect
-              x={selectedDestination.x - 9}
-              y={selectedDestination.y - 9}
-              width="18"
-              height="18"
-              rx="4"
-              fill="#0b2026"
-            />
-
-            <g transform={`translate(${Math.min(selectedOrigin.x + 18, width - 245)} ${Math.max(selectedOrigin.y - 26, 44)})`}>
-              <rect width="228" height="58" rx="8" fill="#fffdf9" stroke="#d9d4cc" />
-              <text x="14" y="24" fill="#0b2026" fontSize="16" fontWeight="700">
-                {selected.origin_region}
-              </text>
-              <text x="14" y="44" fill="#5f6b6f" fontSize="13">
-                {formatDistance(selected.distance_saved_km)} saved
-              </text>
-            </g>
-          </svg>
-
+            Reset India
+          </Button>
           <div className="absolute bottom-4 left-4 grid gap-2 rounded-lg border border-border/60 bg-card/95 p-3 text-xs text-muted-foreground shadow-sm">
             <div className="flex items-center gap-2">
               <span className="h-3 w-3 rounded-full bg-primary" />

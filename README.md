@@ -117,7 +117,7 @@ Pages:
 
 - [`HomePage.tsx`](dais-health-access/client/src/pages/HomePage.tsx): overview shell for the hackathon demo.
 - [`FacilitiesPage.tsx`](dais-health-access/client/src/pages/FacilitiesPage.tsx): Lakebase-backed facility search, filters, result list, and details.
-- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): light-mode shuttle recommendation map with treatment selector, max saved-distance filter, highlighted district origins, route lines to destination facilities, route cards, route table, travel-saved metrics, and signal explanations.
+- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): light-mode Leaflet/OpenStreetMap shuttle recommendation map with drag/zoom interaction, treatment selector, max saved-distance filter, highlighted district origins, route lines to destination facilities, route cards, route table, travel-saved metrics, and signal explanations.
 
 Navigation lives in [`App.tsx`](dais-health-access/client/src/App.tsx). Styling lives in [`index.css`](dais-health-access/client/src/index.css), with AppKit UI styles imported first.
 
