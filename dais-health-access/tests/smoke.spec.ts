@@ -31,8 +31,9 @@ test('prioritization page renders the integrated pipeline view', async ({ page }
 
   await expect(
     page.getByRole('heading', {
-      name: 'Your original prioritization workflow now lives inside the templated app.',
+      name: 'Select a treatment and route patients toward realistic specialty destinations.',
     }),
   ).toBeVisible();
-  await expect(page.getByText('Integrated legacy pipeline')).toBeVisible();
+  await expect(page.getByText('Precomputed recommendation table')).toBeVisible();
+  await expect(page.getByText('Treatment focus')).toBeVisible();
 });
