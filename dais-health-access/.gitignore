@@ -3,6 +3,7 @@ node_modules/
 client/dist/
 dist/
 build/
+outputs/
 .env
 .databricks/
 .smoke-test/
