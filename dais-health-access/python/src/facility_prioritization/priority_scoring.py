@@ -19,8 +19,11 @@ def _haversine_distances(lat, lon, facility_lats, facility_lons):
 def _transport_config(config):
     recommendations_config = config.get("recommendations", {}) if config else {}
     return {
-        "baseline_min_saved_km": recommendations_config.get("baseline_min_saved_km", 25),
-        "baseline_multiplier_floor": recommendations_config.get("baseline_multiplier_floor", 1.15),
+        "shuttle_stop_min_access_km": recommendations_config.get("shuttle_stop_min_access_km", 3),
+        "shuttle_stop_fallback_access_km": recommendations_config.get(
+            "shuttle_stop_fallback_access_km",
+            12,
+        ),
     }
 
 
@@ -36,27 +39,6 @@ def _population_config(config):
             0.5,
         ),
     }
-
-
-def _select_current_referral_baseline(distances, names, recommended_index, config):
-    recommended_distance = float(distances[recommended_index])
-    settings = _transport_config(config)
-    threshold = max(
-        recommended_distance + settings["baseline_min_saved_km"],
-        recommended_distance * settings["baseline_multiplier_floor"],
-    )
-
-    eligible_indices = np.flatnonzero(distances >= threshold)
-    if eligible_indices.size > 0:
-        baseline_index = int(eligible_indices[np.nanargmin(distances[eligible_indices])])
-        return float(distances[baseline_index]), names[baseline_index]
-
-    farther_indices = np.flatnonzero(distances > recommended_distance)
-    if farther_indices.size > 0:
-        baseline_index = int(farther_indices[np.nanargmax(distances[farther_indices])])
-        return float(distances[baseline_index]), names[baseline_index]
-
-    return recommended_distance, names[recommended_index]
 
 
 def _estimate_district_populations(district_coords, config):
@@ -87,6 +69,22 @@ def _estimate_district_populations(district_coords, config):
     return district_coords
 
 
+def _median_distance_to_centroid(group):
+    latitudes = group["latitude_num"].dropna().to_numpy(dtype=float)
+    longitudes = group["longitude_num"].dropna().to_numpy(dtype=float)
+    centroid_lat = group["latitude_num"].median()
+    centroid_lon = group["longitude_num"].median()
+
+    if len(latitudes) == 0 or len(longitudes) == 0 or pd.isna(centroid_lat) or pd.isna(centroid_lon):
+        return np.nan
+
+    distances = _haversine_distances(centroid_lat, centroid_lon, latitudes, longitudes)
+    if distances.size == 0 or np.all(np.isnan(distances)):
+        return np.nan
+
+    return float(np.nanmedian(distances))
+
+
 def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, **kwargs):
     warnings = []
 
@@ -98,6 +96,13 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
     geo_df["district_clean"] = geo_df["district"].apply(clean_district_name)
     geo_df["latitude_num"] = pd.to_numeric(geo_df["latitude"], errors="coerce")
     geo_df["longitude_num"] = pd.to_numeric(geo_df["longitude"], errors="coerce")
+
+    shuttle_access = (
+        geo_df.dropna(subset=["latitude_num", "longitude_num"])
+        .groupby("district_clean")
+        .apply(_median_distance_to_centroid)
+        .reset_index(name="shuttle_stop_access_distance_km")
+    )
 
     district_coords = (
         geo_df.groupby("district_clean")
@@ -120,10 +125,25 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         "pincode_count",
         "post_office_count",
     ]
+    district_coords = district_coords.merge(
+        shuttle_access,
+        left_on="district_name",
+        right_on="district_clean",
+        how="left",
+    ).drop(columns=["district_clean"], errors="ignore")
+    transport_settings = _transport_config(config)
+    district_coords["shuttle_stop_access_distance_km"] = (
+        district_coords["shuttle_stop_access_distance_km"]
+        .fillna(transport_settings["shuttle_stop_fallback_access_km"])
+        .clip(lower=transport_settings["shuttle_stop_min_access_km"])
+    )
     district_coords = _estimate_district_populations(district_coords, config)
     warnings.append(f"Aggregated geo reference to {len(district_coords)} unique districts")
     warnings.append(
         "Estimated district populations from pincode/post-office density because source tables do not include census population"
+    )
+    warnings.append(
+        "Estimated shuttle stop access distance as median pincode/post-office distance to each district centroid"
     )
 
     demand_with_coords = demand_df.copy()
@@ -177,11 +197,11 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         treatment = row["treatment"]
 
         if pd.isna(district_lat) or pd.isna(district_lon):
-            return np.nan, None, np.nan, np.nan, np.nan, None
+            return np.nan, None, np.nan, np.nan
 
         facilities = facilities_by_treatment.get(treatment)
         if not facilities:
-            return np.nan, None, np.nan, np.nan, np.nan, None
+            return np.nan, None, np.nan, np.nan
 
         distances = _haversine_distances(
             district_lat,
@@ -190,22 +210,14 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
             facilities["longitudes"],
         )
         if distances.size == 0 or np.all(np.isnan(distances)):
-            return np.nan, None, np.nan, np.nan, np.nan, None
+            return np.nan, None, np.nan, np.nan
 
         nearest_index = int(np.nanargmin(distances))
-        current_distance, current_facility_name = _select_current_referral_baseline(
-            distances,
-            facilities["names"],
-            nearest_index,
-            config,
-        )
         return (
             float(distances[nearest_index]),
             facilities["names"][nearest_index],
             float(facilities["latitudes"][nearest_index]),
             float(facilities["longitudes"][nearest_index]),
-            current_distance,
-            current_facility_name,
         )
 
     results = demand_with_coords.apply(find_facility_distances, axis=1)
@@ -213,15 +225,18 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
     demand_with_coords["nearest_facility_name"] = results.apply(lambda x: x[1])
     demand_with_coords["nearest_facility_latitude"] = results.apply(lambda x: x[2])
     demand_with_coords["nearest_facility_longitude"] = results.apply(lambda x: x[3])
-    demand_with_coords["current_referral_distance_km"] = results.apply(lambda x: x[4])
-    demand_with_coords["current_referral_facility_name"] = results.apply(lambda x: x[5])
+    demand_with_coords["current_referral_distance_km"] = demand_with_coords["distance_to_nearest_facility_km"]
+    demand_with_coords["current_referral_facility_name"] = demand_with_coords["nearest_facility_name"]
 
     distance_calculated = demand_with_coords["distance_to_nearest_facility_km"].notna().sum()
     warnings.append(f"Distance calculated for {distance_calculated}/{total} district-treatment pairs")
 
+    demand_with_coords["recommended_shuttle_access_distance_km"] = demand_with_coords[
+        "shuttle_stop_access_distance_km"
+    ]
     demand_with_coords["distance_saved_km"] = (
         demand_with_coords["current_referral_distance_km"]
-        - demand_with_coords["distance_to_nearest_facility_km"]
+        - demand_with_coords["recommended_shuttle_access_distance_km"]
     ).clip(lower=0)
     demand_with_coords["transportation_burden_reduction_pct"] = np.where(
         demand_with_coords["current_referral_distance_km"] > 0,
@@ -258,6 +273,7 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
             "current_referral_distance_km",
             "current_referral_facility_name",
             "distance_to_nearest_facility_km",
+            "recommended_shuttle_access_distance_km",
             "nearest_facility_latitude",
             "nearest_facility_longitude",
             "distance_saved_km",

@@ -17,7 +17,7 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 250 `openai_continuous_symptom_mapping` pipeline rows across 25 treatments using the continuous OpenAI symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
+- Current recommendation serving table has 250 `shuttle_stop_access_distance` pipeline rows across 25 treatments using the continuous OpenAI symptom mapping, shuttle-stop access distance proxy, population-weighted priority scoring, and origin/destination coordinates.
 - The production Lakebase symptom mapping now uses the OpenAI-generated continuous, direction-aware regime with one row per `treatment + survey_signal`.
 
 Recent verification:
@@ -31,6 +31,7 @@ Recent verification:
 - Approved OpenAI continuous symptom mapping run succeeded for the top 25 treatments, producing 202 treatment-signal rows with 5 to 11 signals per treatment.
 - Lakebase `app_data.symptom_mappings` was refreshed from that continuous mapping and round-trip exported back to 202 long-form signal rows.
 - Lakebase `app_data.shuttle_recommendations` was refreshed with 250 `openai_continuous_symptom_mapping` recommendation rows.
+- Shuttle-stop distance refresh reused the existing symptom mapping, generated 250 `shuttle_stop_access_distance` recommendation rows, and loaded Lakebase with current distance as district-to-facility distance and recommended distance as local shuttle-stop access distance.
 - Databricks bundle validation passes with profile `dais-health`.
 - HospiShuttle frontend build, typecheck, and lint pass after simplifying the website to the prioritization page only. Playwright smoke was updated for `/`, `/prioritization`, and retired-path redirect behavior, but the local smoke command stalled during Chromium setup in this environment.
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
@@ -156,7 +157,7 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers HospiShuttle
   - seeded by the server for demo safety if empty
-  - currently loaded with 250 `openai_continuous_symptom_mapping` recommendation rows from the Python pipeline
+  - currently loaded with 250 `shuttle_stop_access_distance` recommendation rows from the Python pipeline
 - `app_data.symptom_mappings`
   - loaded by `scripts/load-symptom-mapping-snapshot.ts`
   - stores one row per treatment with a JSONB map of continuous signal weights, directions, confidence values, and rationales
@@ -261,7 +262,7 @@ The default demo-safe path uses deterministic keyword fallback and does not call
 
 Legacy binary wide mappings are still supported. The scoring code converts binary/wide mappings into the continuous long shape internally so the existing persisted Lakebase table can be reused. The Lakebase serving copy stores either binary signal flags or continuous signal payloads in `app_data.symptom_mappings.signal_mapping` as JSONB, and the import/export scripts preserve both formats.
 
-Distance outputs are computed in priority scoring. The recommended distance is the nearest treatment-capable facility; the current distance is a modeled no-shuttle referral baseline chosen from the next farther treatment-capable facility for the same origin and treatment. This keeps `distance_saved_km` and `transportation_burden_reduction_pct` route-specific rather than a fixed multiplier.
+Distance outputs are computed in priority scoring. The current distance is the modeled trip from the origin district centroid to the selected treatment-capable destination facility. The recommended distance is a shuttle-stop access proxy: median pincode/post-office distance to the district centroid, with a small minimum fallback when a district has sparse geography points. `distance_saved_km` is current facility-trip distance minus recommended shuttle-stop access distance, clipped at zero.
 
 Population is estimated because the current source tables do not include census district population. The pipeline uses district pincode and post-office density from the pincode directory to allocate a national population estimate across districts, then applies a population weight to priority scoring. `estimated_people_affected` is derived from that estimated district population and the treatment demand percentile, so larger and higher-need districts rank higher without every row saturating at the same value.
 

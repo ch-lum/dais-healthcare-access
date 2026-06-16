@@ -139,13 +139,14 @@ def _build_region_reason(row):
     demand_score = _safe_number(row.get("treatment_score"))
     district_population = _safe_number(row.get("estimated_district_population"))
     current_distance = _safe_number(row.get("current_referral_distance_km"))
-    recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
+    recommended_distance = _safe_number(row.get("recommended_shuttle_access_distance_km"))
     distance_saved = _safe_number(row.get("distance_saved_km"))
     return (
         f"Modeled demand is elevated for this treatment (score {demand_score:.1f}) in a district with "
         f"an estimated population of {district_population:,.0f}, "
-        f"and the coordinated route can reduce a likely referral trip from "
-        f"{current_distance:.0f} km to {recommended_distance:.0f} km, saving about {distance_saved:.0f} km."
+        f"and the coordinated route can replace an estimated {current_distance:.0f} km trip to the destination "
+        f"facility with about {recommended_distance:.0f} km of local access to a shuttle stop, "
+        f"saving about {distance_saved:.0f} km."
     )
 
 
@@ -186,14 +187,6 @@ def create_app_recommendations(
         "top_n_per_treatment",
         recommendations_config.get("top_n_per_treatment", 10),
     )
-    current_distance_multiplier = kwargs.get(
-        "current_distance_multiplier",
-        recommendations_config.get("current_distance_multiplier", 1.8),
-    )
-    min_distance_saved_km = kwargs.get(
-        "min_distance_saved_km",
-        recommendations_config.get("min_distance_saved_km", 25),
-    )
     snapshot_mode = kwargs.get("snapshot_mode", recommendations_config.get("snapshot_mode", "pipeline"))
     pipeline_version = kwargs.get(
         "source_pipeline_version",
@@ -219,13 +212,11 @@ def create_app_recommendations(
         origin_longitude = _safe_number(row.get("district_lon"))
         destination_latitude = _safe_number(row.get("nearest_facility_latitude"))
         destination_longitude = _safe_number(row.get("nearest_facility_longitude"))
-        recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
+        recommended_distance = _safe_number(
+            row.get("recommended_shuttle_access_distance_km"),
+            _safe_number(row.get("distance_to_nearest_facility_km")),
+        )
         current_distance = _safe_number(row.get("current_referral_distance_km"))
-        if current_distance <= recommended_distance:
-            current_distance = max(
-                recommended_distance + min_distance_saved_km,
-                recommended_distance * current_distance_multiplier,
-            )
         distance_saved = _safe_number(
             row.get("distance_saved_km"),
             max(current_distance - recommended_distance, 0),
@@ -301,6 +292,6 @@ def create_app_recommendations(
     app_df = pd.DataFrame(rows, columns=APP_RECOMMENDATION_COLUMNS)
     warnings.append(f"Created {len(app_df)} app-facing shuttle recommendations")
     warnings.append(
-        "Current-distance fields use the priority table's no-shuttle referral baseline when available"
+        "Current distance is the district-to-facility trip; recommended distance is local shuttle-stop access proxy"
     )
     return app_df, warnings

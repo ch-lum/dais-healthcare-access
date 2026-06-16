@@ -299,7 +299,7 @@ function RouteMapView({
   const selected =
     selectedRecommendation && hasRouteCoordinates(selectedRecommendation)
       ? selectedRecommendation
-      : drawableRecommendations[0] ?? null;
+      : (drawableRecommendations[0] ?? null);
 
   useEffect(() => {
     let active = true;
@@ -387,7 +387,7 @@ function RouteMapView({
         .bindPopup(
           `<strong>${recommendation.origin_region}</strong><br/>${formatLocation([
             recommendation.origin_state,
-          ])}<br/>${formatDistance(recommendation.distance_saved_km)} saved`,
+          ])}<br/>${formatDistance(recommendation.distance_saved_km)} saved versus the facility trip`
         )
         .on('click', () => onSelect(recommendation.id));
       const destinationMarker = leaflet
@@ -402,7 +402,7 @@ function RouteMapView({
           `<strong>${recommendation.destination_facility_name}</strong><br/>${formatLocation([
             recommendation.destination_city,
             recommendation.destination_state,
-          ])}`,
+          ])}`
         )
         .on('click', () => onSelect(recommendation.id));
 
@@ -412,32 +412,18 @@ function RouteMapView({
     });
 
     if (selected) {
-      const selectedBounds = leaflet.latLngBounds(
-        [
-          [
-            toNumber(selected.origin_latitude),
-            toNumber(selected.origin_longitude),
-          ],
-          [
-            toNumber(selected.destination_latitude),
-            toNumber(selected.destination_longitude),
-          ],
-        ] as Leaflet.LatLngExpression[],
-      );
+      const selectedBounds = leaflet.latLngBounds([
+        [toNumber(selected.origin_latitude), toNumber(selected.origin_longitude)],
+        [toNumber(selected.destination_latitude), toNumber(selected.destination_longitude)],
+      ] as Leaflet.LatLngExpression[]);
       map.fitBounds(selectedBounds.pad(0.75), {
         animate: true,
         maxZoom: 7,
       });
     } else if (drawableRecommendations.length > 0) {
       const allPoints = drawableRecommendations.flatMap((recommendation) => [
-        [
-          toNumber(recommendation.origin_latitude),
-          toNumber(recommendation.origin_longitude),
-        ],
-        [
-          toNumber(recommendation.destination_latitude),
-          toNumber(recommendation.destination_longitude),
-        ],
+        [toNumber(recommendation.origin_latitude), toNumber(recommendation.origin_longitude)],
+        [toNumber(recommendation.destination_latitude), toNumber(recommendation.destination_longitude)],
       ]) as Leaflet.LatLngExpression[];
       map.fitBounds(leaflet.latLngBounds(allPoints).pad(0.2), {
         animate: true,
@@ -495,7 +481,7 @@ function RouteMapView({
             <p className="font-semibold text-foreground">{selected?.origin_region}</p>
             <p className="text-xs leading-5 text-muted-foreground">
               {selected
-                ? `${formatDistance(selected.distance_saved_km)} saved to ${selected.destination_facility_name}`
+                ? `${formatDistance(selected.distance_saved_km)} saved with local shuttle-stop access`
                 : 'Select a route'}
             </p>
           </div>
@@ -564,7 +550,9 @@ function RecommendationDetails({ recommendation }: { recommendation: ShuttleReco
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Origin</p>
-            <p className="text-foreground">{formatLocation([recommendation.origin_region, recommendation.origin_state])}</p>
+            <p className="text-foreground">
+              {formatLocation([recommendation.origin_region, recommendation.origin_state])}
+            </p>
           </div>
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Destination</p>
@@ -582,13 +570,13 @@ function RecommendationDetails({ recommendation }: { recommendation: ShuttleReco
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Current</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Facility trip</p>
             <p className="text-xl font-semibold text-foreground">
               {formatDistance(recommendation.current_distance_km)}
             </p>
           </div>
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Recommended</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Shuttle stop</p>
             <p className="text-xl font-semibold text-foreground">
               {formatDistance(recommendation.recommended_distance_km)}
             </p>
@@ -618,7 +606,10 @@ function RecommendationDetails({ recommendation }: { recommendation: ShuttleReco
             <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Top signals</p>
             <div className="space-y-2">
               {signals.map((signal) => (
-                <div key={signal.signal} className="flex items-center justify-between gap-3 rounded-lg bg-secondary/70 px-3 py-2">
+                <div
+                  key={signal.signal}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-secondary/70 px-3 py-2"
+                >
                   <span className="font-medium text-foreground">{signal.signal}</span>
                   <Badge variant="outline">{Math.round(signal.weight * 100)}%</Badge>
                 </div>
@@ -703,7 +694,7 @@ export function PrioritizationPage() {
         }
         const payload = await fetchJson<RecommendationsResponse>(
           `/api/prioritization/recommendations?${params.toString()}`,
-          { signal: controller.signal },
+          { signal: controller.signal }
         );
 
         setRecommendations(payload.recommendations);
@@ -735,7 +726,7 @@ export function PrioritizationPage() {
 
   const selectedRecommendation = useMemo(
     () => recommendations.find((recommendation) => recommendation.id === selectedRecommendationId) ?? null,
-    [recommendations, selectedRecommendationId],
+    [recommendations, selectedRecommendationId]
   );
 
   const currentTreatment = selectedTreatment === 'all' ? 'All treatments' : selectedTreatment;
@@ -745,7 +736,9 @@ export function PrioritizationPage() {
     setRefreshMessage(null);
     try {
       const payload = await fetchJson<RefreshResponse>('/api/prioritization/refresh-demo', { method: 'POST' });
-      setRefreshMessage(`Demo snapshot refreshed: ${payload.loadedRows} routes at ${formatTimestamp(payload.updatedAt)}.`);
+      setRefreshMessage(
+        `Demo snapshot refreshed: ${payload.loadedRows} routes at ${formatTimestamp(payload.updatedAt)}.`
+      );
       setError(null);
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : 'Failed to refresh demo recommendations.');
@@ -927,7 +920,9 @@ export function PrioritizationPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold tracking-tight text-foreground">Mapped routes</h3>
-              <p className="text-sm text-muted-foreground">Select a route to highlight its district and shuttle path.</p>
+              <p className="text-sm text-muted-foreground">
+                Select a route to highlight its district and shuttle path.
+              </p>
             </div>
             <Badge variant="outline">{recommendations.length}</Badge>
           </div>
@@ -979,7 +974,9 @@ export function PrioritizationPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-xl font-semibold tracking-tight text-foreground">Route list</h3>
-            <p className="text-sm text-muted-foreground">A compact operating view for comparing candidate shuttle routes.</p>
+            <p className="text-sm text-muted-foreground">
+              A compact operating view for comparing candidate shuttle routes.
+            </p>
           </div>
           <Badge variant="outline">
             <Clock3 className="h-3.5 w-3.5" />

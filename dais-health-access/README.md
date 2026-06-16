@@ -107,6 +107,8 @@ npm run load:recommendations-snapshot -- outputs/app_recommendations.json
 The Python command can read local CSVs with `--facility-csv`, `--survey-csv`, and `--geo-csv`, or Databricks tables from `python/config/config.yaml`.
 The loader replaces the Lakebase serving table with the latest precomputed rows.
 
+Distance fields use shuttle-stop semantics: `current_distance_km` is the origin district to selected facility distance, `recommended_distance_km` is the local shuttle-stop access proxy from pincode/post-office points to the district centroid, and `distance_saved_km` is the difference clipped at zero.
+
 The page also includes a demo refresh button that reseeds the built-in sample rows for hackathon walkthroughs.
 
 ### Build
