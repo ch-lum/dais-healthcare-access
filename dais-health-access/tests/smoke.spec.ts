@@ -11,6 +11,7 @@ test('overview page renders the main experience shell', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Overview' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Explorer' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Prioritization' })).toBeVisible();
 });
 
 test('explorer page renders facility search controls', async ({ page }) => {
@@ -23,4 +24,15 @@ test('explorer page renders facility search controls', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByPlaceholder('Search facilities, specialties, or cities')).toBeVisible();
   await expect(page.getByText('Result set')).toBeVisible();
+});
+
+test('prioritization page renders the integrated pipeline view', async ({ page }) => {
+  await page.goto('/prioritization');
+
+  await expect(
+    page.getByRole('heading', {
+      name: 'Your original prioritization workflow now lives inside the templated app.',
+    }),
+  ).toBeVisible();
+  await expect(page.getByText('Integrated legacy pipeline')).toBeVisible();
 });

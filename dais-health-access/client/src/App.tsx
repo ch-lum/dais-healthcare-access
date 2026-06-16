@@ -4,6 +4,7 @@ import { Badge, Button, Sheet, SheetContent, SheetHeader, SheetTitle } from '@da
 import { Menu } from 'lucide-react';
 import { FacilitiesPage } from './pages/FacilitiesPage';
 import { HomePage } from './pages/HomePage';
+import { PrioritizationPage } from './pages/PrioritizationPage';
 
 const desktopLinkClass = ({ isActive }: { isActive: boolean }) =>
   `rounded-full px-4 py-2 text-sm font-medium transition-colors ${
@@ -37,6 +38,9 @@ function Navigation({
       </NavLink>
       <NavLink to="/explorer" className={linkClass} onClick={onClick}>
         Explorer
+      </NavLink>
+      <NavLink to="/prioritization" className={linkClass} onClick={onClick}>
+        Prioritization
       </NavLink>
     </nav>
   );
@@ -105,6 +109,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/', element: <HomePage /> },
       { path: '/explorer', element: <FacilitiesPage /> },
+      { path: '/prioritization', element: <PrioritizationPage /> },
     ],
   },
 ]);
