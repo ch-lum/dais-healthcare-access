@@ -271,7 +271,7 @@ function RecommendationCard({
             <p className="text-lg font-semibold text-foreground">{formatDistance(recommendation.distance_saved_km)}</p>
           </div>
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Burden</p>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Burden Reduced</p>
             <p className="text-lg font-semibold text-foreground">
               {formatPercent(recommendation.transportation_burden_reduction_pct)}
             </p>
@@ -835,7 +835,7 @@ export function PrioritizationPage() {
             />
             <MetricCard label="Treatments" value={formatNumber(summary?.treatments ?? 0)} icon={HeartPulse} />
             <MetricCard
-              label="People affected"
+              label="Estimated People Affected"
               value={formatNumber(summary?.estimatedPeopleAffected ?? 0)}
               icon={Users}
             />
