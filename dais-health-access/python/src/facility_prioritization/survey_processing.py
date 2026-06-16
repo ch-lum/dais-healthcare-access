@@ -22,6 +22,13 @@ def clean_survey_data(raw_survey_df, config=None, **kwargs):
         dropped_cols = all_nan[all_nan].index.tolist()
         warnings.append(f"Dropped {len(dropped_cols)} columns with all NaN values: {dropped_cols[:5]}...")
         df = df.drop(columns=dropped_cols)
+        numeric_cols = [col for col in df.columns if col not in preserve_cols]
+
+    missing_before = int(df[numeric_cols].isna().sum().sum()) if numeric_cols else 0
+    if missing_before > 0:
+        medians = df[numeric_cols].median(numeric_only=True)
+        df[numeric_cols] = df[numeric_cols].fillna(medians).fillna(0)
+        warnings.append(f"Imputed {missing_before} missing survey numeric values with column medians/zero")
 
     warnings.append(f"Survey cleaning: {len(raw_survey_df.columns)} -> {len(df.columns)} columns")
     warnings.append(f"Numeric columns: {len([c for c in df.columns if c not in preserve_cols])}")

@@ -47,8 +47,15 @@ def _safe_number(value, default=0.0):
 
 def _first_present(row, columns):
     for column in columns:
-        if column in row.index and pd.notna(row[column]) and str(row[column]).strip():
-            return row[column]
+        if column not in row.index:
+            continue
+        value = row[column]
+        if isinstance(value, (list, tuple, set)):
+            return value if len(value) > 0 else None
+        if pd.isna(value):
+            continue
+        if str(value).strip():
+            return value
     return None
 
 

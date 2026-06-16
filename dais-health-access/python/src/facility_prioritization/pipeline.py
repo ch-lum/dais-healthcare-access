@@ -25,10 +25,16 @@ def _load_csv(path):
     return pd.read_csv(path)
 
 
-def _load_databricks_table(table_name):
+def _load_databricks_table(table_name, profile=None, limit=None, sql=None):
     from .data_loader import load_from_databricks
 
-    return load_from_databricks(table_name)
+    return load_from_databricks(table_name, profile=profile, limit=limit, sql=sql)
+
+
+def _limited_query(sql, limit):
+    if limit is not None and limit > 0:
+        return f"{sql} LIMIT {int(limit)}"
+    return sql
 
 
 def _load_inputs(config, args):
@@ -37,17 +43,75 @@ def _load_inputs(config, args):
     if args.facility_csv:
         facility_df = _load_csv(args.facility_csv)
     else:
-        facility_df = _load_databricks_table(databricks_config["facility_table"])
+        facility_sql = _limited_query(
+            f"""
+            SELECT
+              unique_id,
+              name,
+              organization_type,
+              officialPhone,
+              officialWebsite,
+              email,
+              address_city,
+              address_stateOrRegion AS address_state_or_region,
+              address_country,
+              facilityTypeId AS facility_type_id,
+              specialties,
+              procedure,
+              equipment,
+              description,
+              latitude,
+              longitude,
+              source,
+              source_urls
+            FROM {databricks_config["facility_table"]}
+            WHERE unique_id IS NOT NULL
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+              AND address_country = 'India'
+              AND latitude BETWEEN 6 AND 38
+              AND longitude BETWEEN 68 AND 98
+            """,
+            args.facility_limit,
+        )
+        facility_df = _load_databricks_table(
+            databricks_config["facility_table"],
+            profile=args.databricks_profile,
+            sql=facility_sql,
+        )
 
     if args.survey_csv:
         survey_df = _load_csv(args.survey_csv)
     else:
-        survey_df = _load_databricks_table(databricks_config["survey_table"])
+        survey_df = _load_databricks_table(
+            databricks_config["survey_table"],
+            profile=args.databricks_profile,
+            limit=args.survey_limit,
+        )
 
     if args.geo_csv:
         geo_df = _load_csv(args.geo_csv)
     else:
-        geo_df = _load_databricks_table(databricks_config["geo_reference_table"])
+        geo_sql = _limited_query(
+            f"""
+            SELECT
+              district,
+              statename,
+              TRY_CAST(latitude AS DOUBLE) AS latitude,
+              TRY_CAST(longitude AS DOUBLE) AS longitude
+            FROM {databricks_config["geo_reference_table"]}
+            WHERE district IS NOT NULL
+              AND statename IS NOT NULL
+              AND TRY_CAST(latitude AS DOUBLE) BETWEEN 6 AND 38
+              AND TRY_CAST(longitude AS DOUBLE) BETWEEN 68 AND 98
+            """,
+            args.geo_limit,
+        )
+        geo_df = _load_databricks_table(
+            databricks_config["geo_reference_table"],
+            profile=args.databricks_profile,
+            sql=geo_sql,
+        )
 
     return facility_df, survey_df, geo_df
 
@@ -164,6 +228,10 @@ def build_parser():
     parser.add_argument("--facility-csv", help="Local facility CSV for demo/local runs")
     parser.add_argument("--survey-csv", help="Local survey CSV for demo/local runs")
     parser.add_argument("--geo-csv", help="Local geography CSV for demo/local runs")
+    parser.add_argument("--databricks-profile", help="Databricks CLI profile for local/off-cluster table reads")
+    parser.add_argument("--facility-limit", type=int, default=None, help="Optional facility row limit for demo runs")
+    parser.add_argument("--survey-limit", type=int, default=None, help="Optional survey row limit for demo runs")
+    parser.add_argument("--geo-limit", type=int, default=None, help="Optional geography row limit for demo runs")
     parser.add_argument("--output-dir", help="Directory for recommendation outputs")
     parser.add_argument("--output-base", help="Base filename for app recommendation output")
     parser.add_argument("--output-format", choices=["csv", "json", "both"], default="csv")

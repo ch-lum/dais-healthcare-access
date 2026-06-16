@@ -1,7 +1,19 @@
 import numpy as np
 import pandas as pd
 
-from .utils import clean_district_name, haversine_distance, piecewise_distance_decay
+from .utils import clean_district_name, piecewise_distance_decay
+
+
+def _haversine_distances(lat, lon, facility_lats, facility_lons):
+    lat1 = np.radians(lat)
+    lon1 = np.radians(lon)
+    lat2 = np.radians(facility_lats)
+    lon2 = np.radians(facility_lons)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return c * 6371
 
 
 def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, **kwargs):
@@ -34,6 +46,25 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
     total = len(demand_with_coords)
     warnings.append(f"District coordinate matching: {matched}/{total} ({100 * matched / total:.1f}%)")
 
+    supply_with_coords = supply_df.copy()
+    supply_with_coords["latitude_num"] = pd.to_numeric(supply_with_coords["latitude"], errors="coerce")
+    supply_with_coords["longitude_num"] = pd.to_numeric(supply_with_coords["longitude"], errors="coerce")
+    supply_with_coords = supply_with_coords.dropna(subset=["latitude_num", "longitude_num"])
+
+    facilities_by_treatment = {}
+    for treatment in demand_with_coords["treatment"].dropna().unique():
+        facilities = supply_with_coords[
+            supply_with_coords["top_treatments_offered"].apply(lambda x: treatment in x if isinstance(x, list) else False)
+        ]
+        if facilities.empty:
+            continue
+
+        facilities_by_treatment[treatment] = {
+            "names": facilities["name"].astype(str).to_numpy(),
+            "latitudes": facilities["latitude_num"].to_numpy(dtype=float),
+            "longitudes": facilities["longitude_num"].to_numpy(dtype=float),
+        }
+
     def find_nearest_facility(row):
         district_lat = row["district_lat"]
         district_lon = row["district_lon"]
@@ -42,23 +73,21 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         if pd.isna(district_lat) or pd.isna(district_lon):
             return np.nan, None
 
-        facilities = supply_df[supply_df["top_treatments_offered"].apply(lambda x: treatment in x)]
-        if len(facilities) == 0:
+        facilities = facilities_by_treatment.get(treatment)
+        if not facilities:
             return np.nan, None
 
-        min_distance = float("inf")
-        nearest_facility = None
-        for _idx, facility in facilities.iterrows():
-            facility_lat = facility["latitude"]
-            facility_lon = facility["longitude"]
-            if pd.isna(facility_lat) or pd.isna(facility_lon):
-                continue
-            distance = haversine_distance(district_lat, district_lon, facility_lat, facility_lon)
-            if distance < min_distance:
-                min_distance = distance
-                nearest_facility = facility["name"]
+        distances = _haversine_distances(
+            district_lat,
+            district_lon,
+            facilities["latitudes"],
+            facilities["longitudes"],
+        )
+        if distances.size == 0 or np.all(np.isnan(distances)):
+            return np.nan, None
 
-        return min_distance if min_distance != float("inf") else np.nan, nearest_facility
+        nearest_index = int(np.nanargmin(distances))
+        return float(distances[nearest_index]), facilities["names"][nearest_index]
 
     results = demand_with_coords.apply(find_nearest_facility, axis=1)
     demand_with_coords["distance_to_nearest_facility_km"] = results.apply(lambda x: x[0])

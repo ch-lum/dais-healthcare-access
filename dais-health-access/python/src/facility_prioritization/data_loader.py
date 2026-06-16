@@ -1,22 +1,73 @@
-from pyspark.sql import SparkSession
+import json
+import os
+import subprocess
+
+import pandas as pd
+
+try:
+    from pyspark.sql import SparkSession
+except ImportError:  # pragma: no cover - local/off-cluster runs do not require Spark.
+    SparkSession = None
 
 
-def load_from_databricks(table_name, spark=None):
+def _load_with_databricks_cli(table_name, profile=None, limit=None, sql=None):
+    query = sql or f"SELECT * FROM {table_name}"
+    if limit is not None and limit > 0 and " limit " not in query.lower():
+        query = f"{query} LIMIT {int(limit)}"
+
+    args = [
+        "databricks",
+        "experimental",
+        "aitools",
+        "tools",
+        "query",
+        query,
+        "-o",
+        "json",
+    ]
+
+    if profile:
+        args.extend(["--profile", profile])
+
+    completed = subprocess.run(
+        args,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    rows = json.loads(completed.stdout)
+    return pd.DataFrame(rows)
+
+
+def load_from_databricks(table_name, spark=None, profile=None, limit=None, sql=None):
     """
-    Load table from Databricks Unity Catalog.
+    Load a Unity Catalog table into pandas.
+
+    Uses Spark when running inside Databricks. For local/off-cluster demo runs,
+    falls back to the Databricks CLI query helper with an authenticated profile.
 
     Args:
-        table_name (str): Fully qualified table name
-                         (catalog.schema.table)
-        spark (SparkSession, optional): Existing Spark session
+        table_name (str): Fully qualified table name.
+        spark (SparkSession, optional): Existing Spark session.
+        profile (str, optional): Databricks CLI profile for local runs.
+        limit (int, optional): Row limit for local/demo reads.
+        sql (str, optional): Explicit SQL query to run instead of SELECT *.
 
     Returns:
-        pd.DataFrame: Table as pandas DataFrame
+        pd.DataFrame: Table/query result as pandas DataFrame.
     """
-    if spark is None:
+    if spark is not None:
+        sdf = spark.sql(sql) if sql else spark.table(table_name)
+        if limit is not None and limit > 0:
+            sdf = sdf.limit(int(limit))
+        return sdf.toPandas()
+
+    if SparkSession is not None and os.getenv("DATABRICKS_RUNTIME_VERSION"):
         spark = SparkSession.builder.getOrCreate()
+        sdf = spark.sql(sql) if sql else spark.table(table_name)
+        if limit is not None and limit > 0:
+            sdf = sdf.limit(int(limit))
+        return sdf.toPandas()
 
-    sdf = spark.table(table_name)
-    pdf = sdf.toPandas()
-
-    return pdf
+    cli_profile = profile or os.getenv("DATABRICKS_CONFIG_PROFILE")
+    return _load_with_databricks_cli(table_name, profile=cli_profile, limit=limit, sql=sql)

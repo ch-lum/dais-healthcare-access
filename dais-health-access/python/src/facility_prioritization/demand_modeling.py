@@ -1,9 +1,13 @@
 import json
 import os
 
-import openai
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+
+try:
+    import openai
+except ImportError:  # pragma: no cover - fallback mapping does not require OpenAI.
+    openai = None
 
 
 FALLBACK_SIGNAL_KEYWORDS = {
@@ -100,6 +104,24 @@ def generate_symptom_mapping(treatment_list, survey_columns, api_key=None, confi
             return mapping_df, warnings
 
         raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
+
+    if openai is None:
+        fallback_enabled = kwargs.get(
+            "fallback_on_missing_key",
+            config.get("openai", {}).get("fallback_on_missing_key", True) if config else True,
+        )
+        if fallback_enabled:
+            mapping_df, fallback_warnings = generate_fallback_symptom_mapping(
+                treatment_list,
+                survey_columns,
+                config=config,
+                **kwargs,
+            )
+            warnings.append("OpenAI package is not installed; used deterministic fallback symptom mapping")
+            warnings.extend(fallback_warnings)
+            return mapping_df, warnings
+
+        raise ImportError("OpenAI package is not installed. Install openai or enable fallback mapping.")
 
     model = kwargs.get("model", config.get("openai", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini")
     max_tokens = kwargs.get(

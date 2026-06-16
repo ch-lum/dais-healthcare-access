@@ -42,9 +42,9 @@ distance_decay:
 
 # Databricks Tables (to be configured by user)
 databricks:
-  facility_table: "catalog.schema.facilities"
-  survey_table: "catalog.schema.nfhs_survey"
-  geo_reference_table: "catalog.schema.postal_codes"
+  facility_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities"
+  survey_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.nfhs_5_district_health_indicators"
+  geo_reference_table: "databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.india_post_pincode_directory"
 
 # Output
 output:
