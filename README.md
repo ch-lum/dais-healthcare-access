@@ -537,9 +537,9 @@ databricks bundle validate --profile dais-health
 Current recent project commits:
 
 ```text
+51d5963 Simplify app to HospiShuttle prioritization
 352269b Generate continuous OpenAI symptom mapping
 48d9a9c Add continuous symptom mapping regime
 899802a Replace route sketch with interactive map
 cbf86cc Add prioritization route map view
-22b1fee Weight priority by estimated district population
 ```
