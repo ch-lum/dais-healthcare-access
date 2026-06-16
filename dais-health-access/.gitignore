@@ -8,6 +8,8 @@ build/
 .smoke-test/
 test-results/
 playwright-report/
+python/**/__pycache__/
+python/**/*.pyc
 
 # Auto-generated types (endpoint-specific, varies per developer)
 shared/appkit-types/serving.d.ts
