@@ -381,6 +381,25 @@ def _parse_json_object(content):
     return json.loads(stripped)
 
 
+def _chat_completion_params(model, max_tokens, temperature):
+    normalized_model = str(model).lower()
+    uses_max_completion_tokens = normalized_model.startswith(("gpt-5", "o1", "o3", "o4"))
+    supports_temperature = not normalized_model.startswith(("gpt-5", "o1", "o3", "o4"))
+
+    params = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+    }
+    if uses_max_completion_tokens:
+        params["max_completion_tokens"] = max_tokens
+    else:
+        params["max_tokens"] = max_tokens
+    if supports_temperature:
+        params["temperature"] = temperature
+
+    return params
+
+
 def _coerce_openai_mapping_result(result, treatment, data_columns, model, updated_at):
     selected = result.get("selected_signal_columns")
     if selected is None and "column_mapping" in result:
@@ -549,11 +568,8 @@ Return ONLY valid JSON in this exact shape:
 Use exact column names from the provided array. Do not invent columns."""
 
             response = client.chat.completions.create(
-                model=model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={"type": "json_object"},
+                **_chat_completion_params(model, max_tokens, temperature),
             )
             content = response.choices[0].message.content.strip()
 
@@ -644,6 +660,7 @@ def generate_continuous_symptom_mapping(treatment_list, survey_columns, api_key=
         config.get("openai", {}).get("temperature", 0.2) if config else 0.2,
     )
     strict = kwargs.get("strict", False)
+    max_columns = kwargs.get("max_columns", 12)
 
     client = openai.OpenAI(api_key=api_key)
     data_columns = _survey_data_columns(survey_columns, config=config)
@@ -687,11 +704,8 @@ Return ONLY valid JSON in this exact shape:
 Use exact column names from the provided array. Do not invent columns. Prefer fewer high-quality signals over many weak signals."""
 
             response = client.chat.completions.create(
-                model=model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                response_format={"type": "json_object"},
+                **_chat_completion_params(model, max_tokens, temperature),
             )
             content = response.choices[0].message.content.strip()
 

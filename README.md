@@ -19,7 +19,7 @@ The app currently has a working vertical slice:
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
 - Current recommendation serving table has 250 `map_route_view` pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
-- The pipeline now supports a continuous, direction-aware symptom mapping regime with one row per `treatment + survey_signal`; the currently loaded Lakebase mapping remains the earlier binary production snapshot until a new OpenAI run is explicitly approved.
+- The production Lakebase symptom mapping now uses the OpenAI-generated continuous, direction-aware regime with one row per `treatment + survey_signal`.
 
 Recent verification:
 
@@ -29,6 +29,9 @@ Recent verification:
 - Python package compile check passes for `facility_prioritization`.
 - Continuous fallback symptom mapping synthetic smoke check passes without OpenAI.
 - No OpenAI model call was run for the continuous-regime implementation; model execution remains approval-gated behind `--use-openai-mapping`.
+- Approved OpenAI continuous symptom mapping run succeeded for the top 25 treatments, producing 202 treatment-signal rows with 5 to 11 signals per treatment.
+- Lakebase `app_data.symptom_mappings` was refreshed from that continuous mapping and round-trip exported back to 202 long-form signal rows.
+- Lakebase `app_data.shuttle_recommendations` was refreshed with 250 `openai_continuous_symptom_mapping` recommendation rows.
 - Databricks bundle validation passes with profile `dais-health`.
 - Production frontend preview smoke check passed in local Google Chrome for `/`, `/explorer`, and `/prioritization`.
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
