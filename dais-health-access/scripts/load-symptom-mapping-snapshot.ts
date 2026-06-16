@@ -24,10 +24,25 @@ interface SymptomMappingRow {
   reasoning?: string | null;
   justification?: string | null;
   selected_signal_count?: number | string | null;
+  survey_signal?: string | null;
+  weight?: number | string | null;
+  direction?: number | string | null;
+  confidence?: number | string | null;
+  rationale?: string | null;
   mapping_source?: string | null;
   model?: string | null;
   updated_at?: string | null;
   [signal: string]: unknown;
+}
+
+interface SymptomMappingRecord {
+  treatment: string;
+  justification: string;
+  selectedSignalCount: number;
+  mappingSource: string;
+  model: string | null;
+  updatedAt: string;
+  signalMapping: Record<string, unknown>;
 }
 
 const METADATA_COLUMNS = new Set([
@@ -35,9 +50,15 @@ const METADATA_COLUMNS = new Set([
   'reasoning',
   'justification',
   'selected_signal_count',
+  'survey_signal',
+  'weight',
+  'direction',
+  'confidence',
+  'rationale',
   'mapping_source',
   'model',
   'updated_at',
+  'weighted_direction',
 ]);
 
 function runDatabricksJson<T>(args: string[]) {
@@ -53,7 +74,7 @@ function runDatabricksJson<T>(args: string[]) {
 function ensureEnvironment() {
   if (!ENDPOINT || !HOST || !DATABASE) {
     throw new Error(
-      'Missing Lakebase connection settings. Run this command from the app directory after the scaffolded .env file exists.',
+      'Missing Lakebase connection settings. Run this command from the app directory after the scaffolded .env file exists.'
     );
   }
 }
@@ -108,6 +129,29 @@ function toInteger(value: unknown) {
   return numeric === 1 ? 1 : 0;
 }
 
+function toNumber(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toDirection(value: unknown) {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['lower', 'low', 'negative', '-1', 'inverse'].includes(normalized)) {
+      return -1;
+    }
+    if (['higher', 'high', 'positive', '1', 'direct'].includes(normalized)) {
+      return 1;
+    }
+  }
+
+  return toNumber(value, 1) < 0 ? -1 : 1;
+}
+
+function isContinuousMappingRows(rows: SymptomMappingRow[]) {
+  return rows.some((row) => row.survey_signal && row.weight !== undefined);
+}
+
 function extractSignalMapping(row: SymptomMappingRow) {
   const signalMapping: Record<string, number> = {};
 
@@ -119,6 +163,56 @@ function extractSignalMapping(row: SymptomMappingRow) {
   }
 
   return signalMapping;
+}
+
+function buildBinaryRecords(rows: SymptomMappingRow[]) {
+  return rows.map((row) => {
+    const signalMapping = extractSignalMapping(row);
+    return {
+      treatment: row.treatment,
+      justification: row.justification || row.reasoning || 'No mapping justification provided.',
+      selectedSignalCount: Number(
+        row.selected_signal_count ?? Object.values(signalMapping).filter((value) => value === 1).length
+      ),
+      mappingSource: row.mapping_source || 'openai',
+      model: row.model || null,
+      updatedAt: row.updated_at || new Date().toISOString(),
+      signalMapping,
+    };
+  });
+}
+
+function buildContinuousRecords(rows: SymptomMappingRow[]) {
+  const records = new Map<string, SymptomMappingRecord>();
+
+  for (const row of rows) {
+    const treatment = String(row.treatment || '').trim();
+    const signal = String(row.survey_signal || '').trim();
+    if (!treatment || !signal) {
+      continue;
+    }
+
+    const record = records.get(treatment) || {
+      treatment,
+      justification: row.justification || row.reasoning || 'Continuous weighted symptom mapping.',
+      selectedSignalCount: 0,
+      mappingSource: row.mapping_source || 'openai_continuous',
+      model: row.model || null,
+      updatedAt: row.updated_at || new Date().toISOString(),
+      signalMapping: {},
+    };
+
+    record.signalMapping[signal] = {
+      weight: Math.min(Math.max(toNumber(row.weight, 0), 0), 1),
+      direction: toDirection(row.direction),
+      confidence: Math.min(Math.max(toNumber(row.confidence, 0.5), 0), 1),
+      rationale: row.rationale || row.justification || '',
+    };
+    record.selectedSignalCount = Object.keys(record.signalMapping).length;
+    records.set(treatment, record);
+  }
+
+  return Array.from(records.values());
 }
 
 async function ensureAppTableExists(pool: Pool) {
@@ -136,20 +230,19 @@ async function ensureAppTableExists(pool: Pool) {
   `);
 }
 
-function buildInsertStatement(rows: SymptomMappingRow[]) {
+function buildInsertStatement(records: SymptomMappingRecord[]) {
   const values: unknown[] = [];
-  const tuples = rows.map((row, index) => {
+  const tuples = records.map((record, index) => {
     const base = index * 7;
-    const signalMapping = extractSignalMapping(row);
 
     values.push(
-      row.treatment,
-      row.justification || row.reasoning || 'No mapping justification provided.',
-      Number(row.selected_signal_count ?? Object.values(signalMapping).filter((value) => value === 1).length),
-      row.mapping_source || 'openai',
-      row.model || null,
-      row.updated_at || new Date().toISOString(),
-      JSON.stringify(signalMapping),
+      record.treatment,
+      record.justification,
+      record.selectedSignalCount,
+      record.mappingSource,
+      record.model,
+      record.updatedAt,
+      JSON.stringify(record.signalMapping)
     );
 
     return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}::jsonb)`;
@@ -184,14 +277,18 @@ async function main() {
   if (rows.length === 0) {
     throw new Error(`No symptom mapping rows found in ${INPUT_FILE}.`);
   }
+  const records = isContinuousMappingRows(rows) ? buildContinuousRecords(rows) : buildBinaryRecords(rows);
+  if (records.length === 0) {
+    throw new Error(`No valid symptom mapping records could be built from ${INPUT_FILE}.`);
+  }
 
-  console.log(`Loading ${rows.length} symptom mappings from ${INPUT_FILE} using profile ${PROFILE}...`);
+  console.log(`Loading ${records.length} symptom mappings from ${INPUT_FILE} using profile ${PROFILE}...`);
   const pool = getConnectionPool();
   let transactionStarted = false;
 
   try {
     await ensureAppTableExists(pool);
-    const statement = buildInsertStatement(rows);
+    const statement = buildInsertStatement(records);
     await pool.query('BEGIN');
     transactionStarted = true;
     await pool.query(`TRUNCATE TABLE ${APP_TABLE}`);

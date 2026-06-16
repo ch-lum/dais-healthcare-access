@@ -1,6 +1,7 @@
 This directory brings the pre-template facility prioritization code into the AppKit app.
 
 Contents:
+
 - `src/facility_prioritization/`: the original Python package structure
 - `config/config.yaml`: the original pipeline configuration
 - `requirements.txt`: Python dependencies for the prioritization pipeline
@@ -21,8 +22,19 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
 ```
 
 If CSV paths are omitted, the CLI reads the Databricks tables configured in `config/config.yaml`.
-By default it uses deterministic survey-column keyword mapping for treatment demand signals, so demos do not depend on an OpenAI API key.
-Pass `--use-openai-mapping` to use the OpenAI path when `OPENAI_API_KEY` is available; it still falls back safely if the key is missing.
+By default it uses the continuous deterministic survey-column mapper for treatment demand signals, so demos do not depend on an OpenAI API key.
+Pass `--mapping-regime binary` to reproduce the legacy one-hot mapping path.
+Pass `--use-openai-mapping` only after approving an OpenAI run; the default path does not call the model.
+
+The continuous mapping artifact uses one row per `treatment + survey_signal` with:
+
+- `weight`: continuous relevance from `0.0` to `1.0`
+- `direction`: `1` when higher values imply higher unmet need, `-1` when lower values imply higher unmet need
+- `confidence`: mapper confidence from `0.0` to `1.0`
+- `rationale`: signal-level justification text
+- mapping source, model, and `updated_at`
+
+Existing binary symptom mapping snapshots remain compatible because scoring converts them into the continuous long shape internally.
 
 The app-facing output contains one row per `treatment + origin_region + destination_facility`, including:
 

@@ -19,13 +19,16 @@ The app currently has a working vertical slice:
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
 - Current recommendation serving table has 250 `map_route_view` pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
-- First production symptom mapping artifact exists in generated outputs with one row per treatment, 107 binary survey signal columns, and a text justification.
+- The pipeline now supports a continuous, direction-aware symptom mapping regime with one row per `treatment + survey_signal`; the currently loaded Lakebase mapping remains the earlier binary production snapshot until a new OpenAI run is explicitly approved.
 
 Recent verification:
 
 - `npm run build` passes under Node 24.
 - `npm run typecheck` passes.
 - `npm run lint` passes.
+- Python package compile check passes for `facility_prioritization`.
+- Continuous fallback symptom mapping synthetic smoke check passes without OpenAI.
+- No OpenAI model call was run for the continuous-regime implementation; model execution remains approval-gated behind `--use-openai-mapping`.
 - Databricks bundle validation passes with profile `dais-health`.
 - Production frontend preview smoke check passed in local Google Chrome for `/`, `/explorer`, and `/prioritization`.
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
@@ -232,6 +235,9 @@ Pipeline stages:
 3. Demand modeling
    - `generate_symptom_mapping`
    - `generate_fallback_symptom_mapping`
+   - `generate_continuous_symptom_mapping`
+   - `generate_fallback_continuous_symptom_mapping`
+   - `symptom_mapping_to_long`
    - `calculate_treatment_scores`
    - `create_demand_table`
 4. Priority scoring
@@ -243,17 +249,18 @@ Pipeline stages:
 
 Config lives in [`dais-health-access/python/config/config.yaml`](dais-health-access/python/config/config.yaml).
 
-The OpenAI-based survey-signal mapping path now validates a production table shape:
+The default symptom mapping regime is continuous and direction-aware:
 
-- one row per treatment
-- one binary `0` or `1` column per survey signal
-- text `justification`
-- selected signal count
+- one row per `treatment + survey_signal`
+- continuous `weight` from `0.0` to `1.0`
+- `direction` of `1` when higher survey values indicate more unmet need, or `-1` when lower values indicate more unmet need
+- `confidence` from `0.0` to `1.0`
+- per-signal `rationale`
 - mapping source, model, and update timestamp
 
-The default demo-safe path can still use deterministic keyword fallback when an API key is unavailable. Generated symptom mapping artifacts are written to `outputs/symptom_mapping.csv` and `outputs/symptom_mapping.json`; conceptually this table should be generated once and reused until treatment/survey signal definitions change.
+The default demo-safe path uses deterministic keyword fallback and does not call OpenAI. OpenAI only runs when `--use-openai-mapping` is passed. Generated symptom mapping artifacts are written to `outputs/symptom_mapping.csv` and `outputs/symptom_mapping.json`; conceptually this table should be generated once and reused until treatment/survey signal definitions change.
 
-The wide CSV/JSON artifacts keep every survey signal as a top-level `0` or `1` column for auditability. The Lakebase serving copy stores those same binary signals in `app_data.symptom_mappings.signal_mapping` as JSONB.
+Legacy binary wide mappings are still supported. The scoring code converts binary/wide mappings into the continuous long shape internally so the existing persisted Lakebase table can be reused. The Lakebase serving copy stores either binary signal flags or continuous signal payloads in `app_data.symptom_mappings.signal_mapping` as JSONB, and the import/export scripts preserve both formats.
 
 Distance outputs are computed in priority scoring. The recommended distance is the nearest treatment-capable facility; the current distance is a modeled no-shuttle referral baseline chosen from the next farther treatment-capable facility for the same origin and treatment. This keeps `distance_saved_km` and `transportation_burden_reduction_pct` route-specific rather than a fixed multiplier.
 
@@ -381,7 +388,9 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --output-dir outputs
 ```
 
-Run the current OpenAI-backed top-25 production mapping and recommendation refresh:
+This uses `--mapping-regime continuous` by default and the deterministic fallback mapper unless `--use-openai-mapping` is explicitly provided.
+
+After approval to run OpenAI, generate the continuous top-25 production mapping and recommendation refresh:
 
 ```bash
 PYTHONPATH=python/src python -m facility_prioritization.pipeline \
@@ -390,7 +399,8 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --output-dir outputs \
   --top-n-treatments 25 \
   --top-n-per-treatment 10 \
-  --snapshot-mode openai_symptom_mapping \
+  --snapshot-mode openai_continuous_symptom_mapping \
+  --mapping-regime continuous \
   --use-openai-mapping \
   --strict-openai-mapping
 ```

@@ -8,7 +8,9 @@ from .config import load_config
 from .demand_modeling import (
     calculate_treatment_scores,
     create_demand_table,
+    generate_continuous_symptom_mapping,
     generate_fallback_symptom_mapping,
+    generate_fallback_continuous_symptom_mapping,
     generate_symptom_mapping,
 )
 from .facility_processing import (
@@ -134,14 +136,14 @@ def _write_outputs(
         symptom_mapping_csv = output_dir / f"{symptom_mapping_base}.csv"
         app_recommendations_df.to_csv(app_csv, index=False)
         priority_df.to_csv(priority_csv, index=False)
-        symptom_mapping_df.reset_index().to_csv(symptom_mapping_csv, index=False)
+        _mapping_output_df(symptom_mapping_df).to_csv(symptom_mapping_csv, index=False)
         written.extend([str(app_csv), str(priority_csv), str(symptom_mapping_csv)])
 
     if output_format in {"json", "both"}:
         app_json = output_dir / f"{output_base}.json"
         symptom_mapping_json = output_dir / f"{symptom_mapping_base}.json"
         app_recommendations_df.to_json(app_json, orient="records", indent=2)
-        symptom_mapping_df.reset_index().to_json(
+        _mapping_output_df(symptom_mapping_df).to_json(
             symptom_mapping_json,
             orient="records",
             indent=2,
@@ -151,10 +153,18 @@ def _write_outputs(
     return written
 
 
+def _mapping_output_df(symptom_mapping_df):
+    if "treatment" in symptom_mapping_df.columns:
+        return symptom_mapping_df.copy()
+    return symptom_mapping_df.reset_index()
+
+
 def _load_symptom_mapping(path):
     mapping_df = pd.read_csv(path)
     if "treatment" not in mapping_df.columns:
         raise ValueError("Symptom mapping CSV must include a 'treatment' column")
+    if {"survey_signal", "weight", "direction"}.issubset(mapping_df.columns):
+        return mapping_df
     return mapping_df.set_index("treatment")
 
 
@@ -187,19 +197,35 @@ def run_pipeline(args):
         symptom_mapping_df = _load_symptom_mapping(args.symptom_mapping_csv)
         stage_warnings = [f"Loaded existing symptom mapping from {args.symptom_mapping_csv}"]
     elif args.use_openai_mapping:
-        symptom_mapping_df, stage_warnings = generate_symptom_mapping(
-            top_treatments,
-            cleaned_survey_df.columns,
-            config=config,
-            fallback_on_missing_key=not args.strict_openai_mapping,
-            strict=args.strict_openai_mapping,
-        )
+        if args.mapping_regime == "continuous":
+            symptom_mapping_df, stage_warnings = generate_continuous_symptom_mapping(
+                top_treatments,
+                cleaned_survey_df.columns,
+                config=config,
+                fallback_on_missing_key=not args.strict_openai_mapping,
+                strict=args.strict_openai_mapping,
+            )
+        else:
+            symptom_mapping_df, stage_warnings = generate_symptom_mapping(
+                top_treatments,
+                cleaned_survey_df.columns,
+                config=config,
+                fallback_on_missing_key=not args.strict_openai_mapping,
+                strict=args.strict_openai_mapping,
+            )
     else:
-        symptom_mapping_df, stage_warnings = generate_fallback_symptom_mapping(
-            top_treatments,
-            cleaned_survey_df.columns,
-            config=config,
-        )
+        if args.mapping_regime == "continuous":
+            symptom_mapping_df, stage_warnings = generate_fallback_continuous_symptom_mapping(
+                top_treatments,
+                cleaned_survey_df.columns,
+                config=config,
+            )
+        else:
+            symptom_mapping_df, stage_warnings = generate_fallback_symptom_mapping(
+                top_treatments,
+                cleaned_survey_df.columns,
+                config=config,
+            )
     warnings.extend(stage_warnings)
 
     scores_dict, stage_warnings = calculate_treatment_scores(
@@ -270,6 +296,12 @@ def build_parser():
         help="Base filename for the generated treatment-to-survey symptom mapping output",
     )
     parser.add_argument("--output-format", choices=["csv", "json", "both"], default="csv")
+    parser.add_argument(
+        "--mapping-regime",
+        choices=["continuous", "binary"],
+        default="continuous",
+        help="Treatment-to-survey mapping regime to generate when no existing mapping CSV is provided.",
+    )
     parser.add_argument("--top-n-treatments", type=int, default=None)
     parser.add_argument("--top-n-per-treatment", type=int, default=10)
     parser.add_argument("--snapshot-mode", default="pipeline")

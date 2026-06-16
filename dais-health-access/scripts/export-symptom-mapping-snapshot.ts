@@ -27,7 +27,7 @@ interface SymptomMappingRecord {
   mapping_source: string;
   model: string | null;
   updated_at: string;
-  signal_mapping: Record<string, number>;
+  signal_mapping: Record<string, unknown>;
 }
 
 function runDatabricksJson<T>(args: string[]) {
@@ -43,7 +43,7 @@ function runDatabricksJson<T>(args: string[]) {
 function ensureEnvironment() {
   if (!ENDPOINT || !HOST || !DATABASE) {
     throw new Error(
-      'Missing Lakebase connection settings. Run this command from the app directory after the scaffolded .env file exists.',
+      'Missing Lakebase connection settings. Run this command from the app directory after the scaffolded .env file exists.'
     );
   }
 }
@@ -101,9 +101,52 @@ function writeOutputs(records: SymptomMappingRecord[]) {
     throw new Error(`No rows found in ${APP_TABLE}.`);
   }
 
-  const signalColumns = Array.from(
-    new Set(records.flatMap((record) => Object.keys(record.signal_mapping))),
-  ).sort();
+  const hasContinuousSignals = records.some((record) =>
+    Object.values(record.signal_mapping).some((value) => typeof value === 'object' && value !== null)
+  );
+
+  if (hasContinuousSignals) {
+    writeContinuousOutputs(records);
+    return;
+  }
+
+  writeBinaryOutputs(records);
+}
+
+function writeContinuousOutputs(records: SymptomMappingRecord[]) {
+  const rows = records.flatMap((record) =>
+    Object.entries(record.signal_mapping).map(([surveySignal, payload]) => {
+      const signal = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {};
+      return {
+        treatment: record.treatment,
+        survey_signal: surveySignal,
+        weight: signal.weight ?? 0,
+        direction: signal.direction ?? 1,
+        confidence: signal.confidence ?? 0.5,
+        rationale: signal.rationale ?? record.justification,
+        mapping_source: record.mapping_source,
+        model: record.model,
+        updated_at: record.updated_at,
+      };
+    })
+  );
+  const columns = [
+    'treatment',
+    'survey_signal',
+    'weight',
+    'direction',
+    'confidence',
+    'rationale',
+    'mapping_source',
+    'model',
+    'updated_at',
+  ];
+
+  writeRows(rows, columns);
+}
+
+function writeBinaryOutputs(records: SymptomMappingRecord[]) {
+  const signalColumns = Array.from(new Set(records.flatMap((record) => Object.keys(record.signal_mapping)))).sort();
   const rows = records.map((record) => ({
     treatment: record.treatment,
     reasoning: record.justification,
@@ -115,13 +158,6 @@ function writeOutputs(records: SymptomMappingRecord[]) {
     ...Object.fromEntries(signalColumns.map((column) => [column, Number(record.signal_mapping[column] || 0)])),
   }));
 
-  mkdirSync(dirname(OUTPUT_FILE), { recursive: true });
-
-  if (OUTPUT_FILE.endsWith('.json')) {
-    writeFileSync(OUTPUT_FILE, `${JSON.stringify(rows, null, 2)}\n`);
-    return;
-  }
-
   const columns = [
     'treatment',
     'reasoning',
@@ -132,9 +168,20 @@ function writeOutputs(records: SymptomMappingRecord[]) {
     'updated_at',
     ...signalColumns,
   ];
+  writeRows(rows, columns);
+}
+
+function writeRows(rows: Record<string, unknown>[], columns: string[]) {
+  mkdirSync(dirname(OUTPUT_FILE), { recursive: true });
+
+  if (OUTPUT_FILE.endsWith('.json')) {
+    writeFileSync(OUTPUT_FILE, `${JSON.stringify(rows, null, 2)}\n`);
+    return;
+  }
+
   const csv = [
     columns.map(csvEscape).join(','),
-    ...rows.map((row) => columns.map((column) => csvEscape(row[column as keyof typeof row])).join(',')),
+    ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
   ].join('\n');
 
   writeFileSync(OUTPUT_FILE, `${csv}\n`);

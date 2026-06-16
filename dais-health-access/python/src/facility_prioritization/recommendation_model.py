@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from .demand_modeling import symptom_mapping_to_long
+
 
 APP_RECOMMENDATION_COLUMNS = [
     "id",
@@ -93,19 +95,29 @@ def _match_facility(supply_df, facility_name):
 
 
 def _signals_for_treatment(symptom_mapping_df, treatment, max_signals=3):
-    if symptom_mapping_df is None or symptom_mapping_df.empty or treatment not in symptom_mapping_df.index:
+    if symptom_mapping_df is None or symptom_mapping_df.empty:
         return []
 
-    row = symptom_mapping_df.loc[treatment]
-    signals = []
-    for column, value in row.items():
-        if column in MAPPING_METADATA_COLUMNS:
-            continue
-        weight = _safe_number(value)
-        if weight > 0:
-            signals.append({"signal": str(column).replace("_", " "), "weight": round(weight, 2)})
+    long_mapping = symptom_mapping_to_long(symptom_mapping_df)
+    treatment_mapping = long_mapping[long_mapping["treatment"].astype(str) == str(treatment)].copy()
+    if treatment_mapping.empty:
+        return []
 
-    return signals[:max_signals]
+    treatment_mapping["importance"] = (
+        treatment_mapping["weight"].abs() * treatment_mapping["confidence"].fillna(0.5)
+    )
+    treatment_mapping = treatment_mapping.sort_values("importance", ascending=False).head(max_signals)
+    signals = [
+        {
+            "signal": str(row["survey_signal"]).replace("_", " "),
+            "weight": round(float(row["weight"]), 2),
+            "direction": int(row["direction"]),
+            "confidence": round(float(row["confidence"]), 2),
+        }
+        for _, row in treatment_mapping.iterrows()
+    ]
+
+    return signals
 
 
 def _estimate_people(row, config=None):
