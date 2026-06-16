@@ -528,9 +528,9 @@ databricks bundle validate --profile dais-health
 Current recent project commits:
 
 ```text
+cbf86cc Add prioritization route map view
 22b1fee Weight priority by estimated district population
 e047c88 Fix transportation burden calculations
 024e07d Persist symptom mappings in Lakebase
 0e4ab4c Generate production symptom mappings
-e26a008 Update README with Databricks pipeline run
 ```
