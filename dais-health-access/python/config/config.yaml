@@ -23,6 +23,7 @@ openai:
   max_tokens: 4000
   temperature: 0.3
   api_key_env_var: "OPENAI_API_KEY"
+  fallback_on_missing_key: true
 
 # Distance Decay
 distance_decay:
@@ -48,4 +49,15 @@ databricks:
 # Output
 output:
   csv_filename: "priority_table.csv"
+  app_recommendations_filename: "app_recommendations.csv"
   output_dir: "./outputs"
+
+# App-facing recommendation model
+recommendations:
+  top_n_per_treatment: 10
+  current_distance_multiplier: 1.8
+  min_distance_saved_km: 25
+  base_people_affected: 500
+  max_people_affected: 20000
+  snapshot_mode: "pipeline"
+  source_pipeline_version: "python.facility_prioritization.v1"

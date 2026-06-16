@@ -6,6 +6,73 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 
+FALLBACK_SIGNAL_KEYWORDS = {
+    "oncology": ["cancer", "tumor", "screen", "screening", "breast", "cervical", "chemo"],
+    "cancer": ["cancer", "tumor", "screen", "screening", "breast", "cervical", "chemo"],
+    "dialysis": ["dialysis", "renal", "kidney", "diabetes", "hypertension", "chronic"],
+    "renal": ["dialysis", "renal", "kidney", "diabetes", "hypertension", "chronic"],
+    "cardiology": ["heart", "cardiac", "cardio", "hypertension", "blood pressure", "stroke"],
+    "cardiac": ["heart", "cardiac", "cardio", "hypertension", "blood pressure", "stroke"],
+    "maternity": ["maternal", "pregnancy", "delivery", "antenatal", "birth", "obstetric"],
+    "obstetric": ["maternal", "pregnancy", "delivery", "antenatal", "birth", "obstetric"],
+    "pediatric": ["child", "children", "infant", "immunization", "birth", "neonatal"],
+}
+
+
+def _normalize_column_name(column):
+    return str(column).lower().replace("_", " ").replace("-", " ")
+
+
+def _keywords_for_treatment(treatment):
+    normalized_treatment = _normalize_column_name(treatment)
+    keywords = set(normalized_treatment.split())
+
+    for key, values in FALLBACK_SIGNAL_KEYWORDS.items():
+        if key in normalized_treatment:
+            keywords.update(values)
+
+    keywords.update(["hospital", "illness", "treatment", "unmet", "access"])
+    return {keyword for keyword in keywords if len(keyword) > 2}
+
+
+def generate_fallback_symptom_mapping(treatment_list, survey_columns, config=None, **kwargs):
+    """Create deterministic treatment-to-survey mappings when LLM mapping is unavailable."""
+    warnings = []
+    preserve_cols = (
+        config.get("survey", {}).get("preserve_columns", ["district_name", "state_ut"])
+        if config
+        else ["district_name", "state_ut"]
+    )
+    data_columns = [col for col in survey_columns if col not in preserve_cols]
+    max_columns = kwargs.get("max_columns", 12)
+    mapping_data = []
+
+    for treatment in treatment_list:
+        keywords = _keywords_for_treatment(treatment)
+        selected_columns = [
+            col
+            for col in data_columns
+            if any(keyword in _normalize_column_name(col) for keyword in keywords)
+        ][:max_columns]
+
+        if not selected_columns:
+            selected_columns = data_columns[: min(max_columns, len(data_columns))]
+            warnings.append(
+                f"Fallback mapping for treatment '{treatment}' used broad survey signals because no keyword match was found"
+            )
+
+        row = {
+            "treatment": treatment,
+            "reasoning": "Deterministic keyword fallback used for fast app-serving recommendation generation.",
+        }
+        row.update({col: 1 if col in selected_columns else 0 for col in data_columns})
+        mapping_data.append(row)
+
+    mapping_df = pd.DataFrame(mapping_data).set_index("treatment").fillna(0)
+    warnings.append(f"Generated fallback symptom mapping for {len(treatment_list)} treatments")
+    return mapping_df, warnings
+
+
 def generate_symptom_mapping(treatment_list, survey_columns, api_key=None, config=None, **kwargs):
     warnings = []
 
@@ -17,6 +84,21 @@ def generate_symptom_mapping(treatment_list, survey_columns, api_key=None, confi
             api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key:
+        fallback_enabled = kwargs.get(
+            "fallback_on_missing_key",
+            config.get("openai", {}).get("fallback_on_missing_key", True) if config else True,
+        )
+        if fallback_enabled:
+            mapping_df, fallback_warnings = generate_fallback_symptom_mapping(
+                treatment_list,
+                survey_columns,
+                config=config,
+                **kwargs,
+            )
+            warnings.append("OpenAI API key not provided; used deterministic fallback symptom mapping")
+            warnings.extend(fallback_warnings)
+            return mapping_df, warnings
+
         raise ValueError("OpenAI API key not provided. Set OPENAI_API_KEY environment variable.")
 
     model = kwargs.get("model", config.get("openai", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini")
