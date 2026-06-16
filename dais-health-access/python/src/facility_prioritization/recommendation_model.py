@@ -32,6 +32,16 @@ APP_RECOMMENDATION_COLUMNS = [
 ]
 
 
+MAPPING_METADATA_COLUMNS = {
+    "reasoning",
+    "justification",
+    "selected_signal_count",
+    "mapping_source",
+    "model",
+    "updated_at",
+}
+
+
 def _slugify(value):
     normalized = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
     return normalized or "unknown"
@@ -85,7 +95,7 @@ def _signals_for_treatment(symptom_mapping_df, treatment, max_signals=3):
     row = symptom_mapping_df.loc[treatment]
     signals = []
     for column, value in row.items():
-        if column == "reasoning":
+        if column in MAPPING_METADATA_COLUMNS:
             continue
         weight = _safe_number(value)
         if weight > 0:
@@ -113,10 +123,13 @@ def _estimate_people(demand_score, treatment_rank, max_rank, config=None):
 
 def _build_region_reason(row):
     demand_score = _safe_number(row.get("treatment_score"))
-    effective_distance = _safe_number(row.get("effective_distance"))
+    current_distance = _safe_number(row.get("current_referral_distance_km"))
+    recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
+    distance_saved = _safe_number(row.get("distance_saved_km"))
     return (
         f"Modeled demand is elevated for this treatment (score {demand_score:.1f}), "
-        f"and distance-decay still leaves a transport burden signal of {effective_distance:.1f}."
+        f"and the coordinated route can reduce a likely referral trip from "
+        f"{current_distance:.0f} km to {recommended_distance:.0f} km, saving about {distance_saved:.0f} km."
     )
 
 
@@ -188,12 +201,20 @@ def create_app_recommendations(
         origin_state = row.get("state_ut") or row.get("district_state")
         destination_name = row.get("nearest_facility_name") or "Nearest matched facility"
         recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
-        current_distance = max(
-            recommended_distance + min_distance_saved_km,
-            recommended_distance * current_distance_multiplier,
+        current_distance = _safe_number(row.get("current_referral_distance_km"))
+        if current_distance <= recommended_distance:
+            current_distance = max(
+                recommended_distance + min_distance_saved_km,
+                recommended_distance * current_distance_multiplier,
+            )
+        distance_saved = _safe_number(
+            row.get("distance_saved_km"),
+            max(current_distance - recommended_distance, 0),
         )
-        distance_saved = max(current_distance - recommended_distance, 0)
-        burden_reduction = (distance_saved / current_distance) * 100 if current_distance > 0 else 0
+        burden_reduction = _safe_number(
+            row.get("transportation_burden_reduction_pct"),
+            (distance_saved / current_distance) * 100 if current_distance > 0 else 0,
+        )
         treatment_rank = int(row.get("rank", 1)) if "rank" in row else 1
         max_rank = max_rank_by_treatment.get(treatment, top_n_per_treatment)
         facility = _match_facility(supply_df, destination_name)
@@ -264,6 +285,6 @@ def create_app_recommendations(
     app_df = pd.DataFrame(rows, columns=APP_RECOMMENDATION_COLUMNS)
     warnings.append(f"Created {len(app_df)} app-facing shuttle recommendations")
     warnings.append(
-        "Current-distance fields model the likely no-shuttle referral burden using configurable distance uplift"
+        "Current-distance fields use the priority table's no-shuttle referral baseline when available"
     )
     return app_df, warnings

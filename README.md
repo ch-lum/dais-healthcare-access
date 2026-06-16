@@ -18,7 +18,7 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 250 OpenAI-mapped pipeline rows across 25 treatments.
+- Current recommendation serving table has 250 pipeline rows across 25 treatments using the persisted Lakebase symptom mapping and corrected distance baseline.
 - First production symptom mapping artifact exists in generated outputs with one row per treatment, 107 binary survey signal columns, and a text justification.
 
 Recent verification:
@@ -31,6 +31,7 @@ Recent verification:
 - Databricks App deploy/run succeeded after removing a macOS-only Rolldown native package from direct dependencies.
 - Bounded Databricks-backed Python pipeline run succeeded with 3,000 facility rows, all 706 survey rows, and 50,000 pincode rows.
 - Full Databricks-backed Python pipeline run succeeded for top 25 treatments, strict OpenAI symptom mapping, 17,650 priority rows, and 250 app-serving recommendation rows.
+- Distance-fix refresh reused `app_data.symptom_mappings`, generated 250 recommendation rows, and loaded Lakebase with 178 distinct transportation burden reduction percentages.
 
 ## Demo Story
 
@@ -84,6 +85,7 @@ The app does not recompute heavy prioritization logic on page load. The intended
     |       +-- lakebase/facility-routes.ts
     |       +-- prioritization/pipeline-routes.ts
     +-- scripts/
+    |   +-- export-symptom-mapping-snapshot.ts
     |   +-- load-facilities-snapshot.ts
     |   +-- load-recommendations-snapshot.ts
     |   +-- load-symptom-mapping-snapshot.ts
@@ -150,7 +152,7 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers the prioritization page
   - seeded by the server for demo safety if empty
-  - currently loaded with 250 `openai_symptom_mapping` recommendation rows from the Python pipeline
+  - currently loaded with 250 `lakebase_symptom_mapping_distance_fix` recommendation rows from the Python pipeline
 - `app_data.symptom_mappings`
   - loaded by `scripts/load-symptom-mapping-snapshot.ts`
   - stores one row per treatment with text justification and a JSONB map of all survey signals to `0` or `1`
@@ -246,6 +248,8 @@ The OpenAI-based survey-signal mapping path now validates a production table sha
 The default demo-safe path can still use deterministic keyword fallback when an API key is unavailable. Generated symptom mapping artifacts are written to `outputs/symptom_mapping.csv` and `outputs/symptom_mapping.json`; conceptually this table should be generated once and reused until treatment/survey signal definitions change.
 
 The wide CSV/JSON artifacts keep every survey signal as a top-level `0` or `1` column for auditability. The Lakebase serving copy stores those same binary signals in `app_data.symptom_mappings.signal_mapping` as JSONB.
+
+Distance outputs are computed in priority scoring. The recommended distance is the nearest treatment-capable facility; the current distance is a modeled no-shuttle referral baseline chosen from the next farther treatment-capable facility for the same origin and treatment. This keeps `distance_saved_km` and `transportation_burden_reduction_pct` route-specific rather than a fixed multiplier.
 
 ## Notebooks
 
@@ -386,11 +390,23 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
 Reuse an existing symptom mapping table instead of regenerating it:
 
 ```bash
+export DATABRICKS_CONFIG_PROFILE=dais-health
+export LAKEBASE_ENDPOINT=projects/dais-health-access-db/branches/production/endpoints/primary
+export PGHOST=ep-odd-pine-d8wkh6fv.database.us-east-2.cloud.databricks.com
+export PGDATABASE=databricks_postgres
+export PGPORT=5432
+export PGSSLMODE=require
+
+npm run export:symptom-mapping-snapshot -- outputs/symptom_mapping_from_lakebase.csv
+
 PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --databricks-profile dais-health \
-  --symptom-mapping-csv outputs/symptom_mapping.csv \
+  --symptom-mapping-csv outputs/symptom_mapping_from_lakebase.csv \
   --output-format both \
-  --output-dir outputs
+  --output-dir outputs \
+  --top-n-treatments 25 \
+  --top-n-per-treatment 10 \
+  --snapshot-mode lakebase_symptom_mapping_distance_fix
 ```
 
 For local CSV inputs:
