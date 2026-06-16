@@ -177,11 +177,11 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         treatment = row["treatment"]
 
         if pd.isna(district_lat) or pd.isna(district_lon):
-            return np.nan, None, np.nan, None
+            return np.nan, None, np.nan, np.nan, np.nan, None
 
         facilities = facilities_by_treatment.get(treatment)
         if not facilities:
-            return np.nan, None, np.nan, None
+            return np.nan, None, np.nan, np.nan, np.nan, None
 
         distances = _haversine_distances(
             district_lat,
@@ -190,7 +190,7 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
             facilities["longitudes"],
         )
         if distances.size == 0 or np.all(np.isnan(distances)):
-            return np.nan, None, np.nan, None
+            return np.nan, None, np.nan, np.nan, np.nan, None
 
         nearest_index = int(np.nanargmin(distances))
         current_distance, current_facility_name = _select_current_referral_baseline(
@@ -202,6 +202,8 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
         return (
             float(distances[nearest_index]),
             facilities["names"][nearest_index],
+            float(facilities["latitudes"][nearest_index]),
+            float(facilities["longitudes"][nearest_index]),
             current_distance,
             current_facility_name,
         )
@@ -209,8 +211,10 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
     results = demand_with_coords.apply(find_facility_distances, axis=1)
     demand_with_coords["distance_to_nearest_facility_km"] = results.apply(lambda x: x[0])
     demand_with_coords["nearest_facility_name"] = results.apply(lambda x: x[1])
-    demand_with_coords["current_referral_distance_km"] = results.apply(lambda x: x[2])
-    demand_with_coords["current_referral_facility_name"] = results.apply(lambda x: x[3])
+    demand_with_coords["nearest_facility_latitude"] = results.apply(lambda x: x[2])
+    demand_with_coords["nearest_facility_longitude"] = results.apply(lambda x: x[3])
+    demand_with_coords["current_referral_distance_km"] = results.apply(lambda x: x[4])
+    demand_with_coords["current_referral_facility_name"] = results.apply(lambda x: x[5])
 
     distance_calculated = demand_with_coords["distance_to_nearest_facility_km"].notna().sum()
     warnings.append(f"Distance calculated for {distance_calculated}/{total} district-treatment pairs")
@@ -249,9 +253,13 @@ def create_priority_table(demand_df, supply_df, geo_reference_df, config=None, *
             "estimated_district_population",
             "population_weight",
             "population_proxy_source",
+            "district_lat",
+            "district_lon",
             "current_referral_distance_km",
             "current_referral_facility_name",
             "distance_to_nearest_facility_km",
+            "nearest_facility_latitude",
+            "nearest_facility_longitude",
             "distance_saved_km",
             "transportation_burden_reduction_pct",
             "effective_distance",

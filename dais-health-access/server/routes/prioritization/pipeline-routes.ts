@@ -25,11 +25,15 @@ const CREATE_RECOMMENDATIONS_TABLE_SQL = `
     treatment TEXT NOT NULL,
     origin_region TEXT NOT NULL,
     origin_state TEXT,
+    origin_latitude DOUBLE PRECISION,
+    origin_longitude DOUBLE PRECISION,
     destination_facility_id TEXT,
     destination_facility_name TEXT NOT NULL,
     destination_city TEXT,
     destination_state TEXT,
     destination_country TEXT,
+    destination_latitude DOUBLE PRECISION,
+    destination_longitude DOUBLE PRECISION,
     demand_score DOUBLE PRECISION NOT NULL,
     estimated_people_affected INTEGER NOT NULL,
     current_distance_km DOUBLE PRECISION NOT NULL,
@@ -55,9 +59,18 @@ const CREATE_RECOMMENDATIONS_INDEXES_SQL = `
     ON ${RECOMMENDATIONS_TABLE} (updated_at DESC);
 `;
 
+const ALTER_RECOMMENDATIONS_COORDINATES_SQL = `
+  ALTER TABLE ${RECOMMENDATIONS_TABLE}
+    ADD COLUMN IF NOT EXISTS origin_latitude DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS origin_longitude DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS destination_latitude DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS destination_longitude DOUBLE PRECISION;
+`;
+
 const RecommendationQuery = z.object({
   treatment: z.string().trim().max(120).default('all'),
   limit: z.coerce.number().int().min(1).max(24).default(12),
+  maxDistanceSavedKm: z.coerce.number().min(0).max(5000).optional(),
 });
 
 const demoRecommendations = [
@@ -365,6 +378,7 @@ async function ensureRecommendationsSchema(appkit: AppKitWithLakebaseAndServer) 
 
   await appkit.lakebase.query(CREATE_SCHEMA_SQL);
   await appkit.lakebase.query(CREATE_RECOMMENDATIONS_TABLE_SQL);
+  await appkit.lakebase.query(ALTER_RECOMMENDATIONS_COORDINATES_SQL);
   await appkit.lakebase.query(CREATE_RECOMMENDATIONS_INDEXES_SQL);
 
   const existing = await appkit.lakebase.query(`
@@ -442,17 +456,26 @@ async function listRecommendations(appkit: AppKitWithLakebaseAndServer, rawQuery
   const parsed = RecommendationQuery.parse({
     treatment: getSingleValue(query.treatment),
     limit: getSingleValue(query.limit ?? '12'),
+    maxDistanceSavedKm:
+      query.maxDistanceSavedKm === undefined ? undefined : getSingleValue(query.maxDistanceSavedKm),
   });
 
   const treatment = normalizeTreatment(parsed.treatment);
   const params: unknown[] = [];
-  const whereSql = treatment ? 'WHERE treatment = $1' : '';
+  const whereParts: string[] = [];
 
   if (treatment) {
     params.push(treatment);
+    whereParts.push(`treatment = $${params.length}`);
+  }
+
+  if (typeof parsed.maxDistanceSavedKm === 'number') {
+    params.push(parsed.maxDistanceSavedKm);
+    whereParts.push(`distance_saved_km <= $${params.length}`);
   }
 
   params.push(parsed.limit);
+  const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
 
   const result = await appkit.lakebase.query(
     `
@@ -461,11 +484,15 @@ async function listRecommendations(appkit: AppKitWithLakebaseAndServer, rawQuery
         treatment,
         origin_region,
         origin_state,
+        origin_latitude,
+        origin_longitude,
         destination_facility_id,
         destination_facility_name,
         destination_city,
         destination_state,
         destination_country,
+        destination_latitude,
+        destination_longitude,
         demand_score,
         estimated_people_affected,
         current_distance_km,

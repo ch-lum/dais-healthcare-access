@@ -18,7 +18,7 @@ The app currently has a working vertical slice:
 - Databricks Asset Bundle config pointed at the authenticated workspace.
 - Live Lakebase project for this app: `projects/dais-health-access-db`.
 - Live deployed app URL: `https://dais-health-access-7474644434979404.aws.databricksapps.com`.
-- Current recommendation serving table has 250 pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, and population-weighted priority scoring.
+- Current recommendation serving table has 250 `map_route_view` pipeline rows across 25 treatments using the persisted Lakebase symptom mapping, corrected distance baseline, population-weighted priority scoring, and origin/destination coordinates.
 - First production symptom mapping artifact exists in generated outputs with one row per treatment, 107 binary survey signal columns, and a text justification.
 
 Recent verification:
@@ -33,6 +33,7 @@ Recent verification:
 - Full Databricks-backed Python pipeline run succeeded for top 25 treatments, strict OpenAI symptom mapping, 17,650 priority rows, and 250 app-serving recommendation rows.
 - Distance-fix refresh reused `app_data.symptom_mappings`, generated 250 recommendation rows, and loaded Lakebase with 178 distinct transportation burden reduction percentages.
 - Population-weighted refresh reused `app_data.symptom_mappings`, generated 250 recommendation rows, and loaded Lakebase with 179 distinct people-affected estimates ranging from 2,100 to 140,600.
+- Map-view refresh regenerated 250 coordinate-complete recommendation rows, deployed the app-owned Lakebase schema migration, and loaded all rows with route coordinates.
 
 ## Demo Story
 
@@ -116,7 +117,7 @@ Pages:
 
 - [`HomePage.tsx`](dais-health-access/client/src/pages/HomePage.tsx): overview shell for the hackathon demo.
 - [`FacilitiesPage.tsx`](dais-health-access/client/src/pages/FacilitiesPage.tsx): Lakebase-backed facility search, filters, result list, and details.
-- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): shuttle recommendation experience with treatment selector, recommendation cards, route table, travel-saved metrics, signal explanations, and demo refresh action.
+- [`PrioritizationPage.tsx`](dais-health-access/client/src/pages/PrioritizationPage.tsx): light-mode shuttle recommendation map with treatment selector, max saved-distance filter, highlighted district origins, route lines to destination facilities, route cards, route table, travel-saved metrics, and signal explanations.
 
 Navigation lives in [`App.tsx`](dais-health-access/client/src/App.tsx). Styling lives in [`index.css`](dais-health-access/client/src/index.css), with AppKit UI styles imported first.
 
@@ -153,7 +154,7 @@ Tables:
   - loaded by `scripts/load-recommendations-snapshot.ts`
   - powers the prioritization page
   - seeded by the server for demo safety if empty
-  - currently loaded with 250 `population_weighted_priority` recommendation rows from the Python pipeline
+  - currently loaded with 250 `map_route_view` recommendation rows from the Python pipeline
 - `app_data.symptom_mappings`
   - loaded by `scripts/load-symptom-mapping-snapshot.ts`
   - stores one row per treatment with text justification and a JSONB map of all survey signals to `0` or `1`
@@ -193,11 +194,15 @@ Fields include:
 - `treatment`
 - `origin_region`
 - `origin_state`
+- `origin_latitude`
+- `origin_longitude`
 - `destination_facility_id`
 - `destination_facility_name`
 - `destination_city`
 - `destination_state`
 - `destination_country`
+- `destination_latitude`
+- `destination_longitude`
 - `demand_score`
 - `estimated_people_affected`
 - `current_distance_km`
@@ -409,7 +414,7 @@ PYTHONPATH=python/src python -m facility_prioritization.pipeline \
   --output-dir outputs \
   --top-n-treatments 25 \
   --top-n-per-treatment 10 \
-  --snapshot-mode population_weighted_priority
+  --snapshot-mode map_route_view
 ```
 
 For local CSV inputs:

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, RouterProvider, createBrowserRouter } from 'react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Button, Sheet, SheetContent, SheetHeader, SheetTitle } from '@databricks/appkit-ui/react';
 import { Menu } from 'lucide-react';
 import { FacilitiesPage } from './pages/FacilitiesPage';
@@ -48,6 +48,11 @@ function Navigation({
 
 function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.remove('dark');
+    document.documentElement.style.colorScheme = 'light';
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">

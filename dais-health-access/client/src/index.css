@@ -1,6 +1,7 @@
 @import "@databricks/appkit-ui/styles.css";
 
 :root {
+  color-scheme: light;
   --radius: 1rem;
   --background: #f9f7f4;
   --foreground: #0b2026;
@@ -38,6 +39,11 @@
   --sidebar-accent-foreground: #0b2026;
   --sidebar-border: #d9d4cc;
   --sidebar-ring: #ff7d67;
+}
+
+html {
+  color-scheme: light;
+  background: var(--background);
 }
 
 body {

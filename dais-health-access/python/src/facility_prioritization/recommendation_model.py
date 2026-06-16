@@ -11,11 +11,15 @@ APP_RECOMMENDATION_COLUMNS = [
     "treatment",
     "origin_region",
     "origin_state",
+    "origin_latitude",
+    "origin_longitude",
     "destination_facility_id",
     "destination_facility_name",
     "destination_city",
     "destination_state",
     "destination_country",
+    "destination_latitude",
+    "destination_longitude",
     "demand_score",
     "estimated_people_affected",
     "current_distance_km",
@@ -199,6 +203,10 @@ def create_app_recommendations(
         origin_region = row["district_name"]
         origin_state = row.get("state_ut") or row.get("district_state")
         destination_name = row.get("nearest_facility_name") or "Nearest matched facility"
+        origin_latitude = _safe_number(row.get("district_lat"))
+        origin_longitude = _safe_number(row.get("district_lon"))
+        destination_latitude = _safe_number(row.get("nearest_facility_latitude"))
+        destination_longitude = _safe_number(row.get("nearest_facility_longitude"))
         recommended_distance = _safe_number(row.get("distance_to_nearest_facility_km"))
         current_distance = _safe_number(row.get("current_referral_distance_km"))
         if current_distance <= recommended_distance:
@@ -239,6 +247,8 @@ def create_app_recommendations(
                 "treatment": treatment,
                 "origin_region": origin_region,
                 "origin_state": origin_state,
+                "origin_latitude": round(origin_latitude, 6) if origin_latitude else None,
+                "origin_longitude": round(origin_longitude, 6) if origin_longitude else None,
                 "destination_facility_id": _first_present(
                     facility,
                     ["unique_id", "id", "facility_id"],
@@ -258,6 +268,8 @@ def create_app_recommendations(
                 "destination_country": _first_present(facility, ["address_country", "country"])
                 if facility is not None
                 else None,
+                "destination_latitude": round(destination_latitude, 6) if destination_latitude else None,
+                "destination_longitude": round(destination_longitude, 6) if destination_longitude else None,
                 "demand_score": round(_safe_number(row.get("treatment_score")), 3),
                 "estimated_people_affected": _estimate_people(row, config=config),
                 "current_distance_km": round(current_distance, 1),
