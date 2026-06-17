@@ -1,8 +1,9 @@
-# dais-health-access
+# HospiShuttle
 
-A Databricks App powered by [AppKit](https://www.databricks.com/devhub/docs/appkit/v0/), featuring React, TypeScript, and Tailwind CSS.
+HospiShuttle is a Databricks App powered by [AppKit](https://www.databricks.com/devhub/docs/appkit/v0/), React, TypeScript, Tailwind CSS, and Lakebase. The visible website is intentionally focused on the shuttle-route prioritization page.
 
 **Enabled plugins:**
+
 - **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
 - **Server** -- Express HTTP server with static file serving and Vite dev mode
 
@@ -87,6 +88,28 @@ npm run dev
 ```
 
 The app will be available at the URL shown in the console output.
+
+### Shuttle Recommendation Refresh
+
+HospiShuttle is served from the Lakebase table `app_data.shuttle_recommendations`.
+On first app startup, the server creates that table and seeds a small demo snapshot so the UI works even before the full pipeline has run.
+
+For a pipeline-backed refresh:
+
+```bash
+PYTHONPATH=python/src python -m facility_prioritization.pipeline \
+  --output-format json \
+  --output-dir outputs
+
+npm run load:recommendations-snapshot -- outputs/app_recommendations.json
+```
+
+The Python command can read local CSVs with `--facility-csv`, `--survey-csv`, and `--geo-csv`, or Databricks tables from `python/config/config.yaml`.
+The loader replaces the Lakebase serving table with the latest precomputed rows.
+
+Distance fields use shuttle-stop semantics: `current_distance_km` is the origin district to selected facility distance, `recommended_distance_km` is the local shuttle-stop access proxy from pincode/post-office points to the district centroid, and `distance_saved_km` is the difference clipped at zero.
+
+The page also includes a demo refresh button that reseeds the built-in sample rows for hackathon walkthroughs.
 
 ### Build
 

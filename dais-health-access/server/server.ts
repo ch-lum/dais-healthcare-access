@@ -9,6 +9,6 @@ createApp({
   ],
   async onPluginsReady(appkit) {
     await setupFacilityRoutes(appkit);
-    setupPrioritizationRoutes(appkit);
+    await setupPrioritizationRoutes(appkit);
   },
 }).catch(console.error);
